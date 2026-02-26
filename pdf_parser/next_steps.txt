@@ -1,0 +1,5 @@
+Paste Keys: Put your Azure Endpoint and Key into .env.
+
+Uncomment Azure Calls: In main.py, replace the MockAzureResult with a call to get_raw_azure_data().
+
+Database Link: We can now add a database/mongodb_client.py to push the validated FinancialStatement directly to your Atlas cluster.

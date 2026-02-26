@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 
-# Import our modular parts
 from models.schemas import FinancialLineItem, FinancialStatement
 from processors.cleaners import clean_financial_value
 
