@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 
 class FinancialLineItem(BaseModel):
@@ -8,6 +8,11 @@ class FinancialLineItem(BaseModel):
     value: Optional[float] = None
     unit: str = Field(default="USD")
     scale: str = Field(default="millions", description="e.g., millions, thousands")
+    column_values: Optional[List[Optional[float]]] = None
+    column_units: Optional[List[str]] = None
+    yoy_change: Optional[float] = None
+    yoy_unit: Optional[str] = None
+    supplemental_metrics: Optional[Dict[str, List[Optional[float]]]] = None
 
 class FinancialStatement(BaseModel):
     company_name: str

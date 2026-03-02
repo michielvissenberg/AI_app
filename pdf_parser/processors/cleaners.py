@@ -1,6 +1,10 @@
 import re
 
-def clean_financial_value(raw_value: str) -> float:
+def is_percentage_value(raw_value: str) -> bool:
+    return "%" in (raw_value or "")
+
+
+def clean_financial_value(raw_value: str):
     """
     Parses a string representing a financial amount into a float.
 
@@ -16,11 +20,15 @@ def clean_financial_value(raw_value: str) -> float:
     Returns:
         float: The cleaned numerical value.
     """
-    if not raw_value or "n/a" in raw_value.lower():
-        return 0.0
+    if not raw_value:
+        return None
+
+    normalized = raw_value.strip().lower()
+    if not normalized or normalized in {"n/a", "na", "-", "—", "–", "nm"}:
+        return None
     
     # Remove currency symbols and commas
-    clean_str = re.sub(r'[$, ]', '', raw_value)
+    clean_str = re.sub(r'[$,% ]', '', raw_value)
     
     # Handle negative numbers in parentheses: (100) -> -100
     if clean_str.startswith('(') and clean_str.endswith(')'):
@@ -29,7 +37,7 @@ def clean_financial_value(raw_value: str) -> float:
     try:
         return float(clean_str)
     except ValueError:
-        return 0.0
+        return None
     
 def normalize_label(label: str) -> str:
     """
