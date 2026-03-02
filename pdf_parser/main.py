@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from models.schemas import FinancialStatement
-from processors.azure_engine import get_raw_azure_data
+from processors.azure_engine import extract_financial_tables as extract_financial_tables_azure
 from processors.docling_engine import extract_financial_tables
 from processors.mapper import map_table_cells_to_statement
 
@@ -28,7 +28,7 @@ def extract(
     if not os.getenv("AZURE_ENDPOINT") or not os.getenv("AZURE_KEY"):
         raise ValueError("Azure engine requires AZURE_ENDPOINT and AZURE_KEY in environment.")
 
-    return get_raw_azure_data(pdf_path)
+    return extract_financial_tables_azure(pdf_path)
 
 
 def _parse_markdown_table(markdown_table: str):
@@ -62,36 +62,14 @@ def _parse_markdown_table(markdown_table: str):
 
 
 def normalize(extracted_data, engine: str):
-    if engine == "docling":
-        normalized_cells = []
-        next_row_offset = 0
-        for table_markdown in extracted_data:
-            table_cells = _parse_markdown_table(table_markdown)
-            for cell in table_cells:
-                normalized_cells.append(
-                    {
-                        "row": cell["row"] + next_row_offset,
-                        "column": cell["column"],
-                        "text": cell["text"],
-                    }
-                )
+    if not isinstance(extracted_data, list):
+        raise TypeError("Expected normalized list of table cells from extraction engine.")
 
-            if table_cells:
-                next_row_offset = max(c["row"] for c in normalized_cells) + 1
+    for cell in extracted_data:
+        if not isinstance(cell, dict) or not {"row", "column", "text"}.issubset(cell.keys()):
+            raise TypeError("Normalized cell must contain row, column, and text keys.")
 
-        return normalized_cells
-
-    normalized_cells = []
-    for table in extracted_data.tables:
-        for cell in table.cells:
-            normalized_cells.append(
-                {
-                    "row": cell.row_index,
-                    "column": cell.column_index,
-                    "text": cell.content or "",
-                }
-            )
-    return normalized_cells
+    return extracted_data
 
 
 def map_statement(company_name: str, ticker: str, report_type: str, period_ending: str, table_cells):

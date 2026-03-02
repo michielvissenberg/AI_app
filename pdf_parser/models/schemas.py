@@ -14,6 +14,17 @@ class FinancialLineItem(BaseModel):
     yoy_unit: Optional[str] = None
     supplemental_metrics: Optional[Dict[str, List[Optional[float]]]] = None
 
+
+class NormalizedTableCell(BaseModel):
+    row: int
+    column: int
+    text: str = ""
+
+
+class NormalizedExtraction(BaseModel):
+    cells: List[NormalizedTableCell]
+    source_engine: Optional[str] = None
+
 class FinancialStatement(BaseModel):
     company_name: str
     ticker: str
