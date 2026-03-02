@@ -1,43 +1,121 @@
 import re
 
+
+MISSING_MARKERS = {
+    "",
+    "n/a",
+    "na",
+    "nm",
+    "n.m.",
+    "not meaningful",
+    "not available",
+    "-",
+    "—",
+    "–",
+    "--",
+}
+
+SCALE_TOKEN_MAP = {
+    "k": "thousands",
+    "thousand": "thousands",
+    "thousands": "thousands",
+    "m": "millions",
+    "mm": "millions",
+    "mn": "millions",
+    "million": "millions",
+    "millions": "millions",
+    "b": "billions",
+    "bn": "billions",
+    "billion": "billions",
+    "billions": "billions",
+}
+
+
+def _normalize_raw(raw_value: str) -> str:
+    return (raw_value or "").strip().lower()
+
 def is_percentage_value(raw_value: str) -> bool:
-    return "%" in (raw_value or "")
+    normalized = _normalize_raw(raw_value)
+    return "%" in normalized or "percent" in normalized or "pct" in normalized
+
+
+def _is_missing_value(raw_value: str) -> bool:
+    normalized = _normalize_raw(raw_value)
+    if normalized in MISSING_MARKERS:
+        return True
+
+    normalized_compact = re.sub(r"\s+", "", normalized)
+    return normalized_compact in {"-", "—", "–", "--", "n/a", "na", "nm"}
+
+
+def _extract_scale(raw_value: str, is_percent: bool) -> str:
+    if is_percent:
+        return "percent"
+
+    normalized = _normalize_raw(raw_value)
+
+    match_word = re.search(r"\b(thousand|thousands|million|millions|billion|billions|mn|mm|bn)\b", normalized)
+    if match_word:
+        return SCALE_TOKEN_MAP[match_word.group(1)]
+
+    match_suffix = re.search(r"[-+()$€£\s,]?\d[\d,]*(?:\.\d+)?\s*(k|m|b|bn|mm|mn)\b", normalized)
+    if match_suffix:
+        return SCALE_TOKEN_MAP[match_suffix.group(1)]
+
+    return "units"
+
+
+def parse_financial_value(raw_value: str):
+    is_percent = is_percentage_value(raw_value)
+    unit = "%" if is_percent else "USD"
+    scale = _extract_scale(raw_value, is_percent)
+
+    if _is_missing_value(raw_value):
+        return {
+            "value": None,
+            "parse_status": "missing",
+            "unit": unit,
+            "scale": scale,
+        }
+
+    candidate = (raw_value or "").strip()
+    candidate = candidate.replace("−", "-")
+
+    if candidate.startswith("(") and candidate.endswith(")"):
+        candidate = "-" + candidate[1:-1]
+
+    candidate = re.sub(r"\b(?:thousand|thousands|million|millions|billion|billions|mn|mm|bn)\b", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"[$€£,%\s,]", "", candidate)
+    candidate = re.sub(r"(?<=\d)[kKmMbB]$", "", candidate)
+
+    if candidate in {"", "-", "+", "."}:
+        return {
+            "value": None,
+            "parse_status": "parse_failure",
+            "unit": unit,
+            "scale": scale,
+        }
+
+    try:
+        parsed_number = float(candidate)
+    except ValueError:
+        return {
+            "value": None,
+            "parse_status": "parse_failure",
+            "unit": unit,
+            "scale": scale,
+        }
+
+    return {
+        "value": parsed_number,
+        "parse_status": "ok",
+        "unit": unit,
+        "scale": scale,
+    }
 
 
 def clean_financial_value(raw_value: str):
-    """
-    Parses a string representing a financial amount into a float.
-
-    This function handles common financial formatting:
-    - Removes currency symbols ($) and whitespace.
-    - Removes thousands-separator commas.
-    - Converts accounting-style negative numbers ' (100.00) ' to ' -100.00 '.
-    - Defaults to 0.0 if the string is empty or 'N/A'.
-
-    Args:
-        raw_value (str): The raw string extracted from a document cell.
-
-    Returns:
-        float: The cleaned numerical value.
-    """
-    if not raw_value:
-        return None
-
-    normalized = raw_value.strip().lower()
-    if not normalized or normalized in {"n/a", "na", "-", "—", "–", "nm"}:
-        return None
-    
-    # Remove currency symbols and commas
-    clean_str = re.sub(r'[$,% ]', '', raw_value)
-    
-    # Handle negative numbers in parentheses: (100) -> -100
-    if clean_str.startswith('(') and clean_str.endswith(')'):
-        clean_str = '-' + clean_str[1:-1]
-        
-    try:
-        return float(clean_str)
-    except ValueError:
-        return None
+    return parse_financial_value(raw_value)["value"]
     
 def normalize_label(label: str) -> str:
     """

@@ -1,7 +1,7 @@
 import re
 
 from models.schemas import FinancialLineItem, FinancialStatement
-from processors.cleaners import clean_financial_value, is_percentage_value, normalize_label
+from processors.cleaners import is_percentage_value, normalize_label, parse_financial_value
 
 
 def _looks_like_data_value(value_text: str) -> bool:
@@ -71,17 +71,16 @@ def _extract_value_columns(row: dict):
         if not _looks_like_data_value(raw_text) and not is_percentage_value(raw_text):
             continue
 
-        parsed_value = clean_financial_value(raw_text)
-        unit = "%" if is_percentage_value(raw_text) else "USD"
-        scale = "percent" if unit == "%" else "millions"
+        parsed = parse_financial_value(raw_text)
 
         extracted_columns.append(
             {
                 "column": column_index,
                 "raw_text": raw_text,
-                "value": parsed_value,
-                "unit": unit,
-                "scale": scale,
+                "value": parsed["value"],
+                "unit": parsed["unit"],
+                "scale": parsed["scale"],
+                "parse_status": parsed["parse_status"],
             }
         )
 
@@ -167,6 +166,8 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
         primary_column = value_columns[0]
         column_values = [col["value"] for col in value_columns]
         column_units = [col["unit"] for col in value_columns]
+        column_scales = [col["scale"] for col in value_columns]
+        column_parse_statuses = [col["parse_status"] for col in value_columns]
 
         yoy_change = None
         yoy_unit = None
@@ -182,6 +183,9 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
             scale=primary_column["scale"],
             column_values=column_values,
             column_units=column_units,
+            column_scales=column_scales,
+            column_parse_statuses=column_parse_statuses,
+            parse_status=primary_column["parse_status"],
             yoy_change=yoy_change,
             yoy_unit=yoy_unit,
         )

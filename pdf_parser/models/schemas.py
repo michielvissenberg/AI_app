@@ -10,6 +10,9 @@ class FinancialLineItem(BaseModel):
     scale: str = Field(default="millions", description="e.g., millions, thousands")
     column_values: Optional[List[Optional[float]]] = None
     column_units: Optional[List[str]] = None
+    column_scales: Optional[List[str]] = None
+    column_parse_statuses: Optional[List[str]] = None
+    parse_status: Optional[str] = None
     yoy_change: Optional[float] = None
     yoy_unit: Optional[str] = None
     supplemental_metrics: Optional[Dict[str, List[Optional[float]]]] = None
