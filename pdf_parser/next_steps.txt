@@ -1,18 +1,53 @@
-Database Link: We can now add a database/mongodb_client.py to push the validated FinancialStatement directly to your Atlas cluster.
+MVP NOW (ship-first priorities)
+
+1) Keep parser + evaluator stable
+- Maintain extract -> normalize -> map -> validate -> export flow.
+- Keep evaluation harness as release gate on sample filings.
+
+2) Iterate on filing coverage
+- Add 1-2 additional sample filings and expected benchmark cases.
+- Triage only regressions that affect KPI thresholds or core output correctness.
+
+3) UI/product integration
+- Prioritize end-to-end user flow using current JSON + markdown outputs.
 
 
-done: Stabilize foundation and runtime integrity in requirements.txt, mapper.py, and main.py by resolving dependency/import mismatches and defining one explicit orchestrated flow (extract -> normalize -> map -> validate -> export).
+POST-MVP (architecture hardening)
 
-done: Introduce a normalized intermediate representation for extracted table cells/rows in schemas.py and adapt pdf_parser/processors/dockling_engine.py + azure_engine.py to emit that shape so engines are interchangeable.
+1) Provenance fields (add to statement + line-item outputs)
+- run_id: unique UUID per pipeline execution for cross-stage traceability.
+- source_pdf_path + source_pdf_sha256: immutable source identity and dedupe key.
+- source_engine_primary / source_engine_effective: selected engine vs actual engine used after fallback.
+- extraction_started_at / extraction_completed_at: stage timing for SLA + incident analysis.
+- pipeline_version + mapper_rules_version + evaluation_benchmark_version: reproducibility across releases.
+- confidence fields: statement_type_confidence, period_alignment_confidence, parse_confidence per line item.
+- lineage pointers: source_table_id, source_page_range, source_row_index, source_column_indexes.
 
-done: Harden value parsing and missing-data semantics in cleaners.py: separate 0, missing, and parse-failure states; preserve sign conventions (parentheses negatives), dashes, and scaled units.
+2) Hybrid fallback strategy (engine + quality-gate routing)
+- Primary path: Docling (faster/local control), Azure secondary for recoverability.
+- Trigger fallback when any gate fails:
+  a) extraction gate: table_cells == 0 or stage error classified recoverable,
+  b) mapping gate: statement_detection_accuracy < 95,
+  c) parsing gate: numeric_parse_accuracy < 98,
+  d) schema gate: validation failure or missing critical anchors (revenue/net_income/total_assets).
+- Fallback modes:
+  Mode A: full rerun with alternate engine,
+  Mode B: selective rerun on failed page ranges only,
+  Mode C: merge strategy preferring higher-confidence row blocks.
+- Persist both attempts with provenance and mark final_resolution = primary|fallback|merged.
 
-done: Upgrade statement mapping logic in mapper.py from simple label slugging to rule-based classification for core 10-K statement types and period columns (current/prior).
-
-done: Add dual outputs in main.py: canonical machine JSON (for reliability) and compact markdown narrative (for LLM context windows), with consistent section headers and metric/value/period formatting.
-
-done: Add structured logging + error taxonomy across processors (pdf_parser/processors/dockling_engine.py, azure_engine.py, main.py) so failures are diagnosable and recoverable.
-
-done: Build a small evaluation harness using sample filings from data plus expected outputs, and define quality KPIs (statement detection accuracy, line-item mapping accuracy, numeric parse accuracy).
-
-to do: Capture next-phase architecture in next_steps.txt: provenance fields, hybrid fallback strategy, and persistence layer once MVP accuracy stabilizes.
+3) Persistence layer rollout (after MVP accuracy stabilization)
+- Stabilization criteria before write-enable:
+  - statement_detection_accuracy >= 97 for 10 consecutive sample runs,
+  - line_item_mapping_accuracy >= 97 for 10 consecutive sample runs,
+  - numeric_parse_accuracy >= 99 for 10 consecutive sample runs.
+- Collection design (MongoDB):
+  - filings_raw: immutable run outputs + provenance,
+  - filings_curated: latest accepted statement per (ticker, period_ending, report_type),
+  - evaluations: KPI reports + mismatch diagnostics per run.
+- Keys + indexes:
+  - unique(ticker, period_ending, report_type, source_pdf_sha256, pipeline_version),
+  - index(run_id), index(extracted_at), index(source_engine_effective), index(kpi buckets).
+- Write policy:
+  - upsert curated only if new run passes KPI thresholds and validation,
+  - otherwise store as raw/evaluation only and raise review_required flag.
