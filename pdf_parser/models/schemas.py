@@ -2,7 +2,9 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 from datetime import datetime
 
+
 class FinancialLineItem(BaseModel):
+    """Canonical representation of a single extracted financial metric row."""
     label: str = Field(description="The exact name from the report, e.g., 'Total Revenue'")
     normalized_label: Optional[str] = Field(None, description="Standardized name, e.g., 'revenue'")
     statement_type: Optional[str] = Field(None, description="Inferred statement type, e.g., income_statement")
@@ -26,16 +28,20 @@ class FinancialLineItem(BaseModel):
 
 
 class NormalizedTableCell(BaseModel):
+    """Engine-agnostic normalized table cell with row/column coordinates."""
     row: int
     column: int
     text: str = ""
 
 
 class NormalizedExtraction(BaseModel):
+    """Top-level normalized extraction payload emitted by parsing engines."""
     cells: List[NormalizedTableCell]
     source_engine: Optional[str] = None
 
+
 class FinancialStatement(BaseModel):
+    """Validated financial statement entity assembled from normalized table rows."""
     company_name: str
     ticker: str
     report_type: str = Field(description="10-K or 10-Q")

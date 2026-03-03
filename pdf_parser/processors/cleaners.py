@@ -32,14 +32,18 @@ SCALE_TOKEN_MAP = {
 
 
 def _normalize_raw(raw_value: str) -> str:
+    """Normalizes raw cell text to a lowercase trimmed token."""
     return (raw_value or "").strip().lower()
 
+
 def is_percentage_value(raw_value: str) -> bool:
+    """Returns True when the raw value expresses a percentage-like measure."""
     normalized = _normalize_raw(raw_value)
     return "%" in normalized or "percent" in normalized or "pct" in normalized
 
 
 def _is_missing_value(raw_value: str) -> bool:
+    """Determines whether a raw value represents missing or non-meaningful data."""
     normalized = _normalize_raw(raw_value)
     if normalized in MISSING_MARKERS:
         return True
@@ -49,6 +53,7 @@ def _is_missing_value(raw_value: str) -> bool:
 
 
 def _extract_scale(raw_value: str, is_percent: bool) -> str:
+    """Infers numeric scale units (units/thousands/millions/billions/percent) from raw text."""
     if is_percent:
         return "percent"
 
@@ -66,6 +71,7 @@ def _extract_scale(raw_value: str, is_percent: bool) -> str:
 
 
 def parse_financial_value(raw_value: str):
+    """Parses a financial table value into numeric value, unit, scale, and parse status."""
     is_percent = is_percentage_value(raw_value)
     unit = "%" if is_percent else "USD"
     scale = _extract_scale(raw_value, is_percent)
@@ -115,6 +121,7 @@ def parse_financial_value(raw_value: str):
 
 
 def clean_financial_value(raw_value: str):
+    """Compatibility wrapper that returns only the parsed numeric value."""
     return parse_financial_value(raw_value)["value"]
     
 def normalize_label(label: str) -> str:

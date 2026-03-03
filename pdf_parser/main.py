@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -7,10 +8,15 @@ from dotenv import load_dotenv
 from models.schemas import FinancialStatement
 from processors.azure_engine import extract_financial_tables as extract_financial_tables_azure
 from processors.docling_engine import extract_financial_tables
+from processors.error_handling import ErrorCode, PipelineError, configure_logger, log_event
 from processors.mapper import map_table_cells_to_statement
 
 
+LOGGER = configure_logger(__name__)
+
+
 def _escape_markdown_cell(value):
+    """Escapes markdown-sensitive characters for stable LLM-readable output."""
     if value is None:
         return ""
 
@@ -22,6 +28,7 @@ def _escape_markdown_cell(value):
 
 
 def _format_number(value):
+    """Formats numeric values into compact strings while preserving null semantics."""
     if value is None:
         return "null"
     if isinstance(value, float):
@@ -38,21 +45,65 @@ def extract(
     docling_chunk_size: int = 8,
     docling_num_threads: int = 4,
 ):
+    """Dispatches extraction to the selected engine and validates engine configuration."""
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "pipeline_extract_started",
+        engine=engine,
+        pdf_path=pdf_path,
+        docling_device=docling_device,
+        docling_chunk_size=docling_chunk_size,
+        docling_num_threads=docling_num_threads,
+    )
+
     if engine == "docling":
-        return extract_financial_tables(
-            pdf_path,
-            device=docling_device,
-            chunk_size=docling_chunk_size,
-            num_threads=docling_num_threads,
-        )
+        try:
+            extracted = extract_financial_tables(
+                pdf_path,
+                device=docling_device,
+                chunk_size=docling_chunk_size,
+                num_threads=docling_num_threads,
+            )
+            log_event(LOGGER, logging.INFO, "pipeline_extract_completed", engine=engine, cells=len(extracted))
+            return extracted
+        except PipelineError:
+            raise
+        except Exception as exc:
+            raise PipelineError(
+                ErrorCode.EXTRACTION_ERROR,
+                "Docling extraction failed in pipeline extract stage.",
+                recoverable=True,
+                context={"engine": engine, "pdf_path": pdf_path},
+                cause=exc,
+            ) from exc
 
     if not os.getenv("AZURE_ENDPOINT") or not os.getenv("AZURE_KEY"):
-        raise ValueError("Azure engine requires AZURE_ENDPOINT and AZURE_KEY in environment.")
+        raise PipelineError(
+            ErrorCode.CONFIGURATION_ERROR,
+            "Azure engine requires AZURE_ENDPOINT and AZURE_KEY in environment.",
+            recoverable=False,
+            context={"engine": engine},
+        )
 
-    return extract_financial_tables_azure(pdf_path)
+    try:
+        extracted = extract_financial_tables_azure(pdf_path)
+        log_event(LOGGER, logging.INFO, "pipeline_extract_completed", engine=engine, cells=len(extracted))
+        return extracted
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise PipelineError(
+            ErrorCode.EXTRACTION_ERROR,
+            "Azure extraction failed in pipeline extract stage.",
+            recoverable=True,
+            context={"engine": engine, "pdf_path": pdf_path},
+            cause=exc,
+        ) from exc
 
 
 def _parse_markdown_table(markdown_table: str):
+    """Parses markdown table text into normalized row/column dictionaries."""
     rows = []
     for line in markdown_table.splitlines():
         stripped = line.strip()
@@ -83,39 +134,85 @@ def _parse_markdown_table(markdown_table: str):
 
 
 def normalize(extracted_data, engine: str):
+    """Validates normalized extraction shape before mapping stage execution."""
     if not isinstance(extracted_data, list):
-        raise TypeError("Expected normalized list of table cells from extraction engine.")
+        raise PipelineError(
+            ErrorCode.NORMALIZATION_ERROR,
+            "Expected normalized list of table cells from extraction engine.",
+            recoverable=False,
+            context={"engine": engine, "received_type": type(extracted_data).__name__},
+        )
 
     for cell in extracted_data:
         if not isinstance(cell, dict) or not {"row", "column", "text"}.issubset(cell.keys()):
-            raise TypeError("Normalized cell must contain row, column, and text keys.")
+            raise PipelineError(
+                ErrorCode.NORMALIZATION_ERROR,
+                "Normalized cell must contain row, column, and text keys.",
+                recoverable=False,
+                context={"engine": engine, "invalid_cell": str(cell)},
+            )
 
+    log_event(LOGGER, logging.INFO, "pipeline_normalize_completed", engine=engine, cells=len(extracted_data))
     return extracted_data
 
 
 def map_statement(company_name: str, ticker: str, report_type: str, period_ending: str, table_cells):
-    return map_table_cells_to_statement(
-        company_name=company_name,
-        report_type=report_type,
-        date=period_ending,
-        table_cells=table_cells,
-        ticker=ticker,
-    )
+    """Maps normalized table cells into the FinancialStatement domain model."""
+    try:
+        statement = map_table_cells_to_statement(
+            company_name=company_name,
+            report_type=report_type,
+            date=period_ending,
+            table_cells=table_cells,
+            ticker=ticker,
+        )
+        log_event(LOGGER, logging.INFO, "pipeline_map_completed", items=len(statement.items))
+        return statement
+    except Exception as exc:
+        raise PipelineError(
+            ErrorCode.MAPPING_ERROR,
+            "Failed to map normalized cells to financial statement.",
+            recoverable=False,
+            context={"company_name": company_name, "ticker": ticker, "report_type": report_type},
+            cause=exc,
+        ) from exc
 
 
 def validate(statement: FinancialStatement) -> FinancialStatement:
-    return FinancialStatement.model_validate(statement.model_dump())
+    """Runs schema validation to enforce canonical financial statement shape."""
+    try:
+        validated = FinancialStatement.model_validate(statement.model_dump())
+        log_event(LOGGER, logging.INFO, "pipeline_validate_completed", items=len(validated.items))
+        return validated
+    except Exception as exc:
+        raise PipelineError(
+            ErrorCode.VALIDATION_ERROR,
+            "Financial statement schema validation failed.",
+            recoverable=False,
+            context={"company_name": statement.company_name, "ticker": statement.ticker},
+            cause=exc,
+        ) from exc
 
 
 def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
+    """Exports canonical JSON and compact markdown narrative outputs."""
     output_dir.mkdir(parents=True, exist_ok=True)
     base_name = source_pdf.stem
 
     json_path = output_dir / f"{base_name}_statement.json"
     markdown_path = output_dir / f"{base_name}_statement.md"
 
-    with open(json_path, "w", encoding="utf-8") as handle:
-        json.dump(statement.model_dump(mode="json"), handle, indent=2)
+    try:
+        with open(json_path, "w", encoding="utf-8") as handle:
+            json.dump(statement.model_dump(mode="json"), handle, indent=2)
+    except Exception as exc:
+        raise PipelineError(
+            ErrorCode.EXPORT_ERROR,
+            "Failed to write canonical JSON output.",
+            recoverable=False,
+            context={"json_path": str(json_path)},
+            cause=exc,
+        ) from exc
 
     statement_sections = {
         "income_statement": "Income Statement",
@@ -192,8 +289,26 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
                 f"| yoy={yoy_value}{yoy_unit if yoy_unit else ''} | parse_status={parse_status}{period_meta_text}"
             )
 
-    with open(markdown_path, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(markdown_lines) + "\n")
+    try:
+        with open(markdown_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(markdown_lines) + "\n")
+    except Exception as exc:
+        raise PipelineError(
+            ErrorCode.EXPORT_ERROR,
+            "Failed to write markdown narrative output.",
+            recoverable=False,
+            context={"markdown_path": str(markdown_path)},
+            cause=exc,
+        ) from exc
+
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "pipeline_export_completed",
+        json_path=str(json_path),
+        markdown_path=str(markdown_path),
+        items=len(statement.items),
+    )
 
     return json_path, markdown_path
 
@@ -210,6 +325,18 @@ def run_pipeline(
     docling_chunk_size: int = 8,
     docling_num_threads: int = 4,
 ):
+    """Executes extract-normalize-map-validate-export with structured stage logging."""
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "pipeline_started",
+        pdf_path=str(pdf_path),
+        engine=engine,
+        company_name=company_name,
+        ticker=ticker,
+        report_type=report_type,
+        period_ending=period_ending,
+    )
     extracted = extract(
         str(pdf_path),
         engine,
@@ -220,10 +347,13 @@ def run_pipeline(
     normalized_cells = normalize(extracted, engine)
     mapped_statement = map_statement(company_name, ticker, report_type, period_ending, normalized_cells)
     validated_statement = validate(mapped_statement)
-    return export(validated_statement, output_dir, pdf_path)
+    outputs = export(validated_statement, output_dir, pdf_path)
+    log_event(LOGGER, logging.INFO, "pipeline_completed", json_path=str(outputs[0]), markdown_path=str(outputs[1]))
+    return outputs
 
 
 def main():
+    """CLI entrypoint for running the financial parsing and export pipeline."""
     load_dotenv()
 
     project_root = Path(__file__).resolve().parents[1]
@@ -243,24 +373,34 @@ def main():
 
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
-        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+        raise PipelineError(
+            ErrorCode.INVALID_INPUT,
+            "PDF file path does not exist.",
+            recoverable=False,
+            context={"pdf_path": str(pdf_path)},
+        )
 
-    json_path, markdown_path = run_pipeline(
-        pdf_path=pdf_path,
-        engine=args.engine,
-        company_name=args.company,
-        ticker=args.ticker,
-        report_type=args.report_type,
-        period_ending=args.period_ending,
-        output_dir=Path(args.output_dir),
-        docling_device=args.docling_device,
-        docling_chunk_size=max(1, args.docling_chunk_size),
-        docling_num_threads=max(1, args.docling_num_threads),
-    )
+    try:
+        json_path, markdown_path = run_pipeline(
+            pdf_path=pdf_path,
+            engine=args.engine,
+            company_name=args.company,
+            ticker=args.ticker,
+            report_type=args.report_type,
+            period_ending=args.period_ending,
+            output_dir=Path(args.output_dir),
+            docling_device=args.docling_device,
+            docling_chunk_size=max(1, args.docling_chunk_size),
+            docling_num_threads=max(1, args.docling_num_threads),
+        )
 
-    print("Pipeline completed successfully.")
-    print(f"JSON export: {json_path}")
-    print(f"Markdown export: {markdown_path}")
+        print("Pipeline completed successfully.")
+        print(f"JSON export: {json_path}")
+        print(f"Markdown export: {markdown_path}")
+    except PipelineError as exc:
+        log_event(LOGGER, logging.ERROR, "pipeline_failed", **exc.to_dict())
+        print(f"Pipeline failed [{exc.code.value}]: {exc.message}")
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

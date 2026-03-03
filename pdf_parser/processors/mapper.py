@@ -1,8 +1,13 @@
 import re
+import logging
 from typing import Dict, List, Optional
 
 from models.schemas import FinancialLineItem, FinancialStatement
 from processors.cleaners import is_percentage_value, normalize_label, parse_financial_value
+from processors.error_handling import configure_logger, log_event
+
+
+LOGGER = configure_logger(__name__)
 
 
 STATEMENT_TYPE_RULES = {
@@ -86,6 +91,7 @@ PRIOR_PERIOD_HINTS = {"prior", "previous", "preceding", "last year", "prior year
 
 
 def _looks_like_data_value(value_text: str) -> bool:
+    """Heuristically determines whether a cell value looks like numeric table data."""
     normalized = (value_text or "").strip().lower()
     if not normalized:
         return False
@@ -102,6 +108,7 @@ def _looks_like_data_value(value_text: str) -> bool:
 
 
 def _is_header_like_row(label_text: str, value_text: str) -> bool:
+    """Identifies non-data header rows that should be skipped during mapping."""
     label = (label_text or "").strip().lower()
     value = (value_text or "").strip().lower()
 
@@ -129,6 +136,7 @@ def _is_header_like_row(label_text: str, value_text: str) -> bool:
 
 
 def _is_reference_only_label(label_text: str) -> bool:
+    """Returns True when a label appears to be exhibit/reference metadata rather than a metric."""
     label = (label_text or "").strip()
     if not label:
         return True
@@ -140,6 +148,7 @@ def _is_reference_only_label(label_text: str) -> bool:
 
 
 def _extract_value_columns(row: dict):
+    """Extracts parseable value columns from a normalized row map."""
     extracted_columns = []
     for column_index in sorted(row.keys()):
         if column_index == 0:
@@ -169,6 +178,7 @@ def _extract_value_columns(row: dict):
 
 
 def _is_contextual_percentage_row(label_text: str) -> bool:
+    """Detects contextual percentage lines that augment the previous metric."""
     normalized = normalize_label(label_text)
     return normalized in {
         "percentage_of_total_net_sales",
@@ -178,10 +188,12 @@ def _is_contextual_percentage_row(label_text: str) -> bool:
 
 
 def _normalize_for_rule(text: str) -> str:
+    """Normalizes free text for rule matching by lowering case and collapsing whitespace."""
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
 def _classify_statement_type(label_text: str) -> Optional[str]:
+    """Classifies statement section headers into canonical 10-K statement types."""
     normalized = _normalize_for_rule(label_text)
     if not normalized:
         return None
@@ -194,6 +206,7 @@ def _classify_statement_type(label_text: str) -> Optional[str]:
 
 
 def _classify_canonical_label(label_text: str, statement_type: Optional[str]) -> str:
+    """Maps a raw row label to a canonical metric label using scoped regex rules."""
     normalized = _normalize_for_rule(label_text)
     scoped_rules = CANONICAL_LINE_ITEM_RULES.get(statement_type or "", [])
 
@@ -209,6 +222,7 @@ def _classify_canonical_label(label_text: str, statement_type: Optional[str]) ->
 
 
 def _extract_year_token(text: str) -> Optional[int]:
+    """Extracts the latest year token from text when present."""
     years = re.findall(r"\b(19\d{2}|20\d{2})\b", text or "")
     if not years:
         return None
@@ -216,6 +230,7 @@ def _extract_year_token(text: str) -> Optional[int]:
 
 
 def _is_compact_period_header_text(text: str) -> bool:
+    """Checks whether text is short/clean enough to be trusted as period header metadata."""
     normalized = _normalize_for_rule(text)
     if not normalized:
         return False
@@ -233,6 +248,7 @@ def _is_compact_period_header_text(text: str) -> bool:
 
 
 def _is_period_header_text(text: str) -> bool:
+    """Determines whether text expresses period context such as year/current/prior hints."""
     normalized = _normalize_for_rule(text)
     if not normalized:
         return False
@@ -257,6 +273,7 @@ def _is_period_header_text(text: str) -> bool:
 
 
 def _collect_period_column_context(rows: Dict[int, Dict[int, str]]) -> Dict[int, List[str]]:
+    """Collects likely period header text per column from early table rows."""
     context: Dict[int, List[str]] = {}
 
     first_data_row = None
@@ -313,6 +330,7 @@ def _collect_period_column_context(rows: Dict[int, Dict[int, str]]) -> Dict[int,
 
 
 def _infer_period_column_roles(rows: Dict[int, Dict[int, str]]) -> Dict[int, Dict[str, Optional[str]]]:
+    """Infers current/prior roles for table columns from explicit hints and detected years."""
     context = _collect_period_column_context(rows)
     if not context:
         return {}
@@ -360,6 +378,7 @@ def _resolve_period_values(
     value_columns: List[Dict[str, object]],
     period_roles: Dict[int, Dict[str, Optional[str]]],
 ):
+    """Resolves current/prior values and metadata from parsed row values and inferred column roles."""
     current_value = None
     prior_value = None
     current_label = None
@@ -461,6 +480,17 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
         models.schemas.FinancialStatement: A fully validated Pydantic object 
             ready for database insertion.
     """
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "mapper_started",
+        company_name=company_name,
+        report_type=report_type,
+        period_ending=date,
+        table_cells=len(table_cells or []),
+        ticker=ticker,
+    )
+
     line_items = []
     
     rows = {}
@@ -557,7 +587,7 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
         )
         line_items.append(item)
 
-    return FinancialStatement(
+    statement = FinancialStatement(
         company_name=company_name,
         ticker=ticker,
         report_type=report_type,
@@ -565,8 +595,20 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
         items=line_items
     )
 
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "mapper_completed",
+        company_name=company_name,
+        items=len(statement.items),
+        inferred_statement_type=inferred_statement_type,
+    )
+
+    return statement
+
 
 def map_azure_table_to_statement(company_name, report_type, date, azure_table_cells):
+    """Backward-compatible adapter for mapping Azure-style normalized table cells."""
     return map_table_cells_to_statement(
         company_name=company_name,
         report_type=report_type,

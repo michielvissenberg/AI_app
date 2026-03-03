@@ -11,7 +11,7 @@ done: Upgrade statement mapping logic in mapper.py from simple label slugging to
 
 done: Add dual outputs in main.py: canonical machine JSON (for reliability) and compact markdown narrative (for LLM context windows), with consistent section headers and metric/value/period formatting.
 
-to do: Add structured logging + error taxonomy across processors (pdf_parser/processors/dockling_engine.py, azure_engine.py, main.py) so failures are diagnosable and recoverable.
+done: Add structured logging + error taxonomy across processors (pdf_parser/processors/dockling_engine.py, azure_engine.py, main.py) so failures are diagnosable and recoverable.
 
 to do: Build a small evaluation harness using sample filings from data plus expected outputs, and define quality KPIs (statement detection accuracy, line-item mapping accuracy, numeric parse accuracy).
 
