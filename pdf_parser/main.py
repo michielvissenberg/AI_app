@@ -21,6 +21,16 @@ def _escape_markdown_cell(value):
     return text
 
 
+def _format_number(value):
+    if value is None:
+        return "null"
+    if isinstance(value, float):
+        if value.is_integer():
+            return f"{int(value)}"
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
 def extract(
     pdf_path: str,
     engine: str,
@@ -107,8 +117,21 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
     with open(json_path, "w", encoding="utf-8") as handle:
         json.dump(statement.model_dump(mode="json"), handle, indent=2)
 
+    statement_sections = {
+        "income_statement": "Income Statement",
+        "balance_sheet": "Balance Sheet",
+        "cash_flow_statement": "Cash Flow Statement",
+        "equity_statement": "Equity Statement",
+        "unclassified": "Unclassified",
+    }
+
+    grouped_items = {key: [] for key in statement_sections.keys()}
+    for item in statement.items:
+        section_key = item.statement_type if item.statement_type in statement_sections else "unclassified"
+        grouped_items[section_key].append(item)
+
     markdown_lines = [
-        "# Financial Statement",
+        "# Financial Statement Narrative",
         "",
         f"- Company: {statement.company_name}",
         f"- Ticker: {statement.ticker}",
@@ -123,42 +146,51 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
         "- Statement Scope: core_10k_income_balance_sheet_cash_flow_equity",
         "- Period Roles: inferred_current_and_prior_from_headers_and_year_tokens",
         "",
-        "## Line Items",
+        "## Narrative Format",
         "",
-        "| Label | Canonical Label | Statement Type | Value | Unit | Scale | Parse Status | YoY | YoY Unit | Current Period Value | Prior Period Value | Current Period Label | Prior Period Label | Current Period Column | Prior Period Column | Column Values JSON | Column Units JSON | Column Scales JSON | Column Parse Statuses JSON | Supplemental Metrics JSON |",
-        "|---|---|---|---:|---|---|---|---:|---|---:|---:|---|---|---:|---:|---|---|---|---|---|",
+        "Each metric line uses: canonical_label | raw_label | unit | scale | current | prior | yoy | parse_status",
     ]
 
-    for item in statement.items:
-        column_values_json = json.dumps(item.column_values or [])
-        column_units_json = json.dumps(item.column_units or [])
-        column_scales_json = json.dumps(item.column_scales or [])
-        column_parse_statuses_json = json.dumps(item.column_parse_statuses or [])
-        supplemental_metrics_json = json.dumps(item.supplemental_metrics or {})
+    for section_key, section_title in statement_sections.items():
+        items = grouped_items.get(section_key, [])
+        if not items:
+            continue
 
-        markdown_lines.append(
-            "| "
-            f"{item.label} | "
-            f"{item.normalized_label or ''} | "
-            f"{item.statement_type or ''} | "
-            f"{item.value if item.value is not None else ''} | "
-            f"{item.unit} | "
-            f"{item.scale} | "
-            f"{item.parse_status or ''} | "
-            f"{item.yoy_change if item.yoy_change is not None else ''} | "
-            f"{item.yoy_unit or ''} | "
-            f"{item.current_period_value if item.current_period_value is not None else ''} | "
-            f"{item.prior_period_value if item.prior_period_value is not None else ''} | "
-            f"{item.current_period_label or ''} | "
-            f"{item.prior_period_label or ''} | "
-            f"{item.current_period_column if item.current_period_column is not None else ''} | "
-            f"{item.prior_period_column if item.prior_period_column is not None else ''} | "
-            f"{_escape_markdown_cell(column_values_json)} | "
-            f"{_escape_markdown_cell(column_units_json)} | "
-            f"{_escape_markdown_cell(column_scales_json)} | "
-            f"{_escape_markdown_cell(column_parse_statuses_json)} | "
-            f"{_escape_markdown_cell(supplemental_metrics_json)} |"
-        )
+        markdown_lines.extend([
+            "",
+            f"## {section_title}",
+            "",
+        ])
+
+        for item in items:
+            canonical_label = _escape_markdown_cell(item.normalized_label or "")
+            raw_label = _escape_markdown_cell(item.label)
+            unit = _escape_markdown_cell(item.unit)
+            scale = _escape_markdown_cell(item.scale)
+            current_value = _format_number(item.current_period_value)
+            prior_value = _format_number(item.prior_period_value)
+            yoy_value = _format_number(item.yoy_change)
+            yoy_unit = _escape_markdown_cell(item.yoy_unit or "")
+            parse_status = _escape_markdown_cell(item.parse_status or "")
+
+            period_meta = []
+            if item.current_period_label:
+                period_meta.append(f"current_label={_escape_markdown_cell(item.current_period_label)}")
+            if item.prior_period_label:
+                period_meta.append(f"prior_label={_escape_markdown_cell(item.prior_period_label)}")
+            if item.current_period_column is not None:
+                period_meta.append(f"current_col={item.current_period_column}")
+            if item.prior_period_column is not None:
+                period_meta.append(f"prior_col={item.prior_period_column}")
+
+            period_meta_text = f"; {'; '.join(period_meta)}" if period_meta else ""
+
+            markdown_lines.append(
+                "- "
+                f"{canonical_label} | raw={raw_label} | unit={unit} | scale={scale} "
+                f"| current={current_value} | prior={prior_value} "
+                f"| yoy={yoy_value}{yoy_unit if yoy_unit else ''} | parse_status={parse_status}{period_meta_text}"
+            )
 
     with open(markdown_path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(markdown_lines) + "\n")
