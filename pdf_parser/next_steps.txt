@@ -13,6 +13,6 @@ done: Add dual outputs in main.py: canonical machine JSON (for reliability) and 
 
 done: Add structured logging + error taxonomy across processors (pdf_parser/processors/dockling_engine.py, azure_engine.py, main.py) so failures are diagnosable and recoverable.
 
-to do: Build a small evaluation harness using sample filings from data plus expected outputs, and define quality KPIs (statement detection accuracy, line-item mapping accuracy, numeric parse accuracy).
+done: Build a small evaluation harness using sample filings from data plus expected outputs, and define quality KPIs (statement detection accuracy, line-item mapping accuracy, numeric parse accuracy).
 
 to do: Capture next-phase architecture in next_steps.txt: provenance fields, hybrid fallback strategy, and persistence layer once MVP accuracy stabilizes.

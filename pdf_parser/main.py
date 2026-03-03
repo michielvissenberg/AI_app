@@ -10,7 +10,9 @@ from processors.azure_engine import extract_financial_tables as extract_financia
 from processors.docling_engine import extract_financial_tables
 from processors.error_handling import ErrorCode, PipelineError, configure_logger, log_event
 from processors.mapper import map_table_cells_to_statement
-
+"""
+example use: pdf_parser/main.py --pdf data/AAPL.pdf --engine docling --docling-device cuda --company "Apple Inc." --ticker AAPL --report-type 10-K --period-ending 2025-09-27 --output-dir data
+"""
 
 LOGGER = configure_logger(__name__)
 
