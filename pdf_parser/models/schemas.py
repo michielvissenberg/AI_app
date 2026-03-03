@@ -5,6 +5,7 @@ from datetime import datetime
 class FinancialLineItem(BaseModel):
     label: str = Field(description="The exact name from the report, e.g., 'Total Revenue'")
     normalized_label: Optional[str] = Field(None, description="Standardized name, e.g., 'revenue'")
+    statement_type: Optional[str] = Field(None, description="Inferred statement type, e.g., income_statement")
     value: Optional[float] = None
     unit: str = Field(default="USD")
     scale: str = Field(default="millions", description="e.g., millions, thousands")
@@ -15,6 +16,12 @@ class FinancialLineItem(BaseModel):
     parse_status: Optional[str] = None
     yoy_change: Optional[float] = None
     yoy_unit: Optional[str] = None
+    current_period_value: Optional[float] = None
+    prior_period_value: Optional[float] = None
+    current_period_label: Optional[str] = None
+    prior_period_label: Optional[str] = None
+    current_period_column: Optional[int] = None
+    prior_period_column: Optional[int] = None
     supplemental_metrics: Optional[Dict[str, List[Optional[float]]]] = None
 
 

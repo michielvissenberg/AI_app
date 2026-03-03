@@ -10,6 +10,17 @@ from processors.docling_engine import extract_financial_tables
 from processors.mapper import map_table_cells_to_statement
 
 
+def _escape_markdown_cell(value):
+    if value is None:
+        return ""
+
+    text = str(value)
+    text = text.replace("\\", "\\\\")
+    text = text.replace("|", "\\|")
+    text = text.replace("\n", " ").replace("\r", " ")
+    return text
+
+
 def extract(
     pdf_path: str,
     engine: str,
@@ -103,20 +114,50 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
         f"- Ticker: {statement.ticker}",
         f"- Report Type: {statement.report_type}",
         f"- Period Ending: {statement.period_ending}",
+        f"- Extracted At: {statement.extracted_at.isoformat()}",
+        f"- Source PDF: {source_pdf.name}",
+        "",
+        "## Extraction Metadata",
+        "",
+        "- Mapping Strategy: rule_based_statement_and_period_classification",
+        "- Statement Scope: core_10k_income_balance_sheet_cash_flow_equity",
+        "- Period Roles: inferred_current_and_prior_from_headers_and_year_tokens",
         "",
         "## Line Items",
         "",
-        "| Label | Normalized | Value | Unit | Scale | YoY | Columns |",
-        "|---|---|---:|---|---|---:|---|",
+        "| Label | Canonical Label | Statement Type | Value | Unit | Scale | Parse Status | YoY | YoY Unit | Current Period Value | Prior Period Value | Current Period Label | Prior Period Label | Current Period Column | Prior Period Column | Column Values JSON | Column Units JSON | Column Scales JSON | Column Parse Statuses JSON | Supplemental Metrics JSON |",
+        "|---|---|---|---:|---|---|---|---:|---|---:|---:|---|---|---:|---:|---|---|---|---|---|",
     ]
 
     for item in statement.items:
-        columns_preview = ", ".join(
-            "" if value is None else str(value)
-            for value in (item.column_values or [])
-        )
+        column_values_json = json.dumps(item.column_values or [])
+        column_units_json = json.dumps(item.column_units or [])
+        column_scales_json = json.dumps(item.column_scales or [])
+        column_parse_statuses_json = json.dumps(item.column_parse_statuses or [])
+        supplemental_metrics_json = json.dumps(item.supplemental_metrics or {})
+
         markdown_lines.append(
-            f"| {item.label} | {item.normalized_label or ''} | {item.value if item.value is not None else ''} | {item.unit} | {item.scale} | {item.yoy_change if item.yoy_change is not None else ''} | {columns_preview} |"
+            "| "
+            f"{item.label} | "
+            f"{item.normalized_label or ''} | "
+            f"{item.statement_type or ''} | "
+            f"{item.value if item.value is not None else ''} | "
+            f"{item.unit} | "
+            f"{item.scale} | "
+            f"{item.parse_status or ''} | "
+            f"{item.yoy_change if item.yoy_change is not None else ''} | "
+            f"{item.yoy_unit or ''} | "
+            f"{item.current_period_value if item.current_period_value is not None else ''} | "
+            f"{item.prior_period_value if item.prior_period_value is not None else ''} | "
+            f"{item.current_period_label or ''} | "
+            f"{item.prior_period_label or ''} | "
+            f"{item.current_period_column if item.current_period_column is not None else ''} | "
+            f"{item.prior_period_column if item.prior_period_column is not None else ''} | "
+            f"{_escape_markdown_cell(column_values_json)} | "
+            f"{_escape_markdown_cell(column_units_json)} | "
+            f"{_escape_markdown_cell(column_scales_json)} | "
+            f"{_escape_markdown_cell(column_parse_statuses_json)} | "
+            f"{_escape_markdown_cell(supplemental_metrics_json)} |"
         )
 
     with open(markdown_path, "w", encoding="utf-8") as handle:
