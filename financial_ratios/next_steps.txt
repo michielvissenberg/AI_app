@@ -1,0 +1,1 @@
+- compute ratios based on market data (which is not yet extracted)

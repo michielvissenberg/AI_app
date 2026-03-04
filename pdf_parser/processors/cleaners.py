@@ -1,5 +1,7 @@
 import re
 
+from models.normalization_maps import NORMALIZED_LABEL_MAPS, SCALE_TOKEN_MAP
+
 
 MISSING_MARKERS = {
     "",
@@ -14,22 +16,6 @@ MISSING_MARKERS = {
     "–",
     "--",
 }
-
-SCALE_TOKEN_MAP = {
-    "k": "thousands",
-    "thousand": "thousands",
-    "thousands": "thousands",
-    "m": "millions",
-    "mm": "millions",
-    "mn": "millions",
-    "million": "millions",
-    "millions": "millions",
-    "b": "billions",
-    "bn": "billions",
-    "billion": "billions",
-    "billions": "billions",
-}
-
 
 def _normalize_raw(raw_value: str) -> str:
     """Normalizes raw cell text to a lowercase trimmed token."""
@@ -142,4 +128,17 @@ def normalize_label(label: str) -> str:
     Returns:
         str: A slug-style normalized string.
     """
-    return label.strip().lower().replace(" ", "_").replace(":", "")
+    normalized = (label or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9\s_&/.-]", "", normalized)
+    normalized = normalized.replace(":", "")
+    normalized = normalized.replace("&", " and ")
+    normalized = normalized.replace("/", " ")
+    normalized = re.sub(r"[\s.-]+", "_", normalized)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+
+    for label_map in NORMALIZED_LABEL_MAPS:
+        mapped = label_map.get(normalized)
+        if mapped is not None:
+            return mapped
+
+    return normalized
