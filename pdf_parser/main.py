@@ -104,37 +104,6 @@ def extract(
         ) from exc
 
 
-def _parse_markdown_table(markdown_table: str):
-    """Parses markdown table text into normalized row/column dictionaries."""
-    rows = []
-    for line in markdown_table.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|") or not stripped.endswith("|"):
-            continue
-
-        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-        if not cells:
-            continue
-
-        if all(part.replace(":", "").replace("-", "") == "" for part in cells):
-            continue
-
-        rows.append(cells)
-
-    if not rows:
-        return []
-
-    if len(rows) > 1:
-        rows = rows[1:]
-
-    normalized_cells = []
-    for row_index, row in enumerate(rows):
-        for column_index, text in enumerate(row):
-            normalized_cells.append({"row": row_index, "column": column_index, "text": text})
-
-    return normalized_cells
-
-
 def normalize(extracted_data, engine: str):
     """Validates normalized extraction shape before mapping stage execution."""
     if not isinstance(extracted_data, list):
