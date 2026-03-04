@@ -4,6 +4,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 from scripts.aggregator import aggregate_statement_items
+from scripts.ratio_enricher import add_ratios_to_compressed_payload
 
 
 def _to_jsonable(data):
@@ -25,9 +26,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
 	args = parse_args()
 	input_path = Path(args.input_path)
+	raw_statement_payload = json.loads(input_path.read_text(encoding="utf-8"))
 
 	aggregated = aggregate_statement_items(input_path)
-	output_payload = _to_jsonable(aggregated)
+	compressed_payload = _to_jsonable(aggregated)
+	output_payload = add_ratios_to_compressed_payload(
+		compressed_payload=compressed_payload,
+		aggregated_metrics=aggregated,
+		raw_statement_payload=raw_statement_payload,
+	)
 
 	output_dir = Path(__file__).resolve().parents[1] / "data_compressed"
 	output_dir.mkdir(parents=True, exist_ok=True)

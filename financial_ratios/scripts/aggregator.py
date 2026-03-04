@@ -15,6 +15,24 @@ from collections import defaultdict
 
 import json
 
+PREFERRED_STATEMENT_TYPE_BY_LABEL = {
+    "revenue": "income_statement",
+    "gross_profit": "income_statement",
+    "operating_income": "income_statement",
+    "net_income": "income_statement",
+    "total_assets": "balance_sheet",
+    "total_liabilities": "balance_sheet",
+    "total_current_assets": "balance_sheet",
+    "total_current_liabilities": "balance_sheet",
+    "cash_and_cash_equivalents": "balance_sheet",
+    "accounts_receivable_net": "balance_sheet",
+    "marketable_securities": "balance_sheet",
+    "total_shareholders_equity": "balance_sheet",
+    "net_cash_from_operating_activities": "cash_flow_statement",
+    "net_cash_from_investing_activities": "cash_flow_statement",
+    "net_cash_from_financing_activities": "cash_flow_statement",
+}
+
 def aggregate_statement_items(statement_json_path: Path) -> Dict[str, AggregatedMetric]:
     """Main entrypoint used by callers.
     Expected flow:
@@ -53,16 +71,50 @@ def _resolve_duplicates(grouped_items: Dict[str, List[Dict[str, Any]]]) -> Dict[
         if len(entries) == 1:
             best_item = entries[0]
         else:
-            best_item = max(entries, key=lambda x: x.get("value", 0) or 0)
+            best_item = _pick_best_duplicate(entries, label)
+
+        selected_value = best_item.get("current_period_value")
+        if selected_value is None:
+            selected_value = best_item.get("value")
+
         resolved[label] = AggregatedMetric(
             normalized_label=label,
-            value=best_item.get("value"),
+            value=selected_value,
             priorValue=best_item.get("prior_period_value"),
             unit=best_item.get("unit"),
             source_label=best_item.get("label"),
             statement_type=best_item.get("statement_type")
         )
     return resolved
+
+
+def _pick_best_duplicate(entries: List[Dict[str, Any]], normalized_label: str) -> Dict[str, Any]:
+    preferred_statement_type = PREFERRED_STATEMENT_TYPE_BY_LABEL.get(normalized_label)
+
+    def score(item: Dict[str, Any]) -> tuple[int, int, float]:
+        points = 0
+
+        if str(item.get("parse_status", "")).lower() == "ok":
+            points += 3
+
+        has_current_period_value = item.get("current_period_value") is not None
+        if has_current_period_value:
+            points += 4
+
+        statement_type = item.get("statement_type")
+        if statement_type:
+            points += 1
+        if preferred_statement_type and statement_type == preferred_statement_type:
+            points += 4
+
+        selected_value = item.get("current_period_value")
+        if selected_value is None:
+            selected_value = item.get("value")
+        magnitude = abs(float(selected_value)) if selected_value not in (None, "") else 0.0
+
+        return points, int(has_current_period_value), magnitude
+
+    return max(entries, key=score)
 
 def _clean_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """remove noise entries in the data"""
@@ -74,11 +126,10 @@ def _clean_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _is_noise(item: Dict[str, Any]) -> bool:
     label = str(item.get('normalized_label', ''))
     unit = str(item.get('unit', '')).upper()
-    noise_keywords = ['thereafter', 'rsus_', 'common_stock_outstanding', 's&p_500', 'index', 'dow_jones', 'amortized', 'imputed', 'accounting_fair_value', 'less_']
+    noise_keywords = ['thereafter', 'rsus_', 'common_stock_outstanding', 's&p_500', 'index', 'dow_jones', 'amortized', 'imputed', 'accounting_fair_value', 'less_', '/s/']
     
-#    if item.get('value') is None: return True
-    if label.startswith('/s/'): return True
-    if label.isdigit() and len(label) == 4: return True
+    if item.get('value') is None: return True
+    if label.isdigit(): return True
     if any(word in label for word in noise_keywords): return True
     if label in ['total', 'basic', 'diluted']: return True
 
