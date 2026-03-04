@@ -1,3 +1,7 @@
+bugs found afterwards that need improvement: 
+- remove duplicates like total revenue from the eventual JSON and .md files 
+
+
 MVP NOW (ship-first priorities)
 
 1) Keep parser + evaluator stable
