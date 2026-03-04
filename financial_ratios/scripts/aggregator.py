@@ -57,6 +57,7 @@ def _resolve_duplicates(grouped_items: Dict[str, List[Dict[str, Any]]]) -> Dict[
         resolved[label] = AggregatedMetric(
             normalized_label=label,
             value=best_item.get("value"),
+            priorValue=best_item.get("prior_period_value"),
             unit=best_item.get("unit"),
             source_label=best_item.get("label"),
             statement_type=best_item.get("statement_type")
