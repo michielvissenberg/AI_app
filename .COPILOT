@@ -1,0 +1,43 @@
+# AI App Model Instructions
+
+## Project Objective
+
+Build a reliable financial analysis pipeline that transforms company filings into structured data, computes core and market-enriched ratios, stores the enriched dataset for retrieval, and generates evidence-backed LLM analysis.
+
+## Output Conventions
+
+- Keep outputs machine-readable first (stable field names and predictable structures).
+- Keep ratio outputs transparent: include value, description, inputs, status, and error/missing fields when relevant.
+- In analysis text, separate facts, interpretation, and uncertainty.
+- Cite the specific metrics/ratios used in each conclusion.
+
+## Implementation Style
+
+- Prefer incremental changes that keep existing module boundaries intact.
+- Reuse existing scripts in financial_ratios and pdf_parser before adding new layers.
+- Add lightweight validation checks when introducing new data sources.
+- Keep documentation and next-step notes updated when scope changes.
+
+## Current State
+
+- PDF extraction and cleanup are implemented and being refined.
+- Core financial ratio computation is mostly implemented.
+- Next priority is market data enrichment, then persistence for retrieval, then LLM analysis.
+
+## Preferred Processing Order
+
+1. Parse and clean filing data from PDF outputs.
+2. Normalize fields and aggregate statement data.
+3. Compute statement-based financial ratios.
+4. Enrich with market data (for example via yahoofinance).
+5. Compute market-aware and valuation ratios.
+6. Persist enriched records for retrieval (vector database preferred).
+7. Run LLM analysis using retrieved numeric and textual evidence.
+
+## Data Quality Guardrails
+
+- Never invent financial values, market values, or ratio inputs.
+- If inputs are missing, return explicit missing-fields status instead of guessing.
+- Preserve provenance for each metric when possible (source label, statement type, period, ticker, run metadata).
+- Keep units explicit and consistent.
+- Favor deterministic transformations over opaque heuristics.
