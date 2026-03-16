@@ -35,6 +35,7 @@ A single reliable pipeline:
 ### Stage A - Stabilize Extraction Contract (Blocking)
 
 > Detailed plan: [plan/plan_A.md](plan_A.md)
+> Extraction contract: [plan/extraction_contract.md](extraction_contract.md)
 
 **Goal:** make parser outputs dependable enough to support all downstream modules.
 

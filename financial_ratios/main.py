@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
-from scripts.aggregator import aggregate_statement_items
+from scripts.aggregator import aggregate_statement_items_with_diagnostics
 from scripts.ratio_enricher import add_ratios_to_compressed_payload
 
 
@@ -28,7 +28,7 @@ def main() -> int:
 	input_path = Path(args.input_path)
 	raw_statement_payload = json.loads(input_path.read_text(encoding="utf-8"))
 
-	aggregated = aggregate_statement_items(input_path)
+	aggregated, duplicate_diagnostics = aggregate_statement_items_with_diagnostics(input_path)
 	compressed_payload = _to_jsonable(aggregated)
 	output_payload = add_ratios_to_compressed_payload(
 		compressed_payload=compressed_payload,
@@ -39,9 +39,13 @@ def main() -> int:
 	output_dir = Path(__file__).resolve().parents[1] / "data_compressed"
 	output_dir.mkdir(parents=True, exist_ok=True)
 	output_path = output_dir / f"{input_path.stem}.json"
+	diagnostics_path = output_dir / f"{input_path.stem}_duplicate_diagnostics.json"
 
 	with open(output_path, "w", encoding="utf-8") as handle:
 		json.dump(output_payload, handle, indent=2)
+
+	with open(diagnostics_path, "w", encoding="utf-8") as handle:
+		json.dump(_to_jsonable(duplicate_diagnostics), handle, indent=2)
 
 	return 0
 
