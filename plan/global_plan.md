@@ -95,6 +95,8 @@ A single reliable pipeline:
 
 ### Stage C - Market Data Enrichment
 
+> Detailed plan: [plan/plan_C.md](plan_C.md)
+
 **Goal:** add market context per ticker/period via Python data source integration (Yahoo Finance first).
 
 **Tasks**
@@ -129,6 +131,8 @@ A single reliable pipeline:
 
 ### Stage D - Extended Ratio Computation
 
+> Detailed plan: [plan/plan_D.md](plan_D.md)
+
 **Goal:** compute additional market-aware ratios using enriched data.
 
 **Tasks**
@@ -161,6 +165,8 @@ A single reliable pipeline:
 ---
 
 ### Stage E - Persistence and Retrieval Layer
+
+> Detailed plan: [plan/plan_E.md](plan_E.md)
 
 **Goal:** persist enriched financial records for both exact queries and semantic retrieval.
 
@@ -195,6 +201,8 @@ A single reliable pipeline:
 
 ### Stage F - LLM Analysis Pipeline
 
+> Detailed plan: [plan/plan_F.md](plan_F.md)
+
 **Goal:** generate grounded financial analysis from retrieved evidence.
 
 **Tasks**
@@ -226,6 +234,8 @@ A single reliable pipeline:
 ---
 
 ### Stage G - End-to-End Integration and Release Gate
+
+> Detailed plan: [plan/plan_G.md](plan_G.md)
 
 **Goal:** prove reliable pipeline behavior on multiple companies/periods.
 
