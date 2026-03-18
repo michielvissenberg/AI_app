@@ -502,21 +502,22 @@ def _resolve_period_values(
 
 def map_table_cells_to_statement(company_name, report_type, date, table_cells, ticker="TBD"):
     """
-    Iterates through Azure analysis results to populate a validated FinancialStatement.
+    Maps normalized table cells into a validated FinancialStatement domain model.
 
-    This function filters through the 'azure_result' tables, cleans each row's 
-    values using the cleaner utilities, and initializes Pydantic models (FinancialLineItem).
-    It ensures that the final object adheres to the project's 'Golden Standard' schema.
+    Processes extracted table cells from any engine (Docling, Azure, etc.), classifies 
+    statement types and line items, infers column periods, cleans values using cleaners,
+    and constructs FinancialLineItem objects conforming to the Golden Standard schema.
 
     Args:
         company_name (str): Name of the entity (e.g., 'Apple Inc.').
         report_type (str): Type of filing (e.g., '10-K' or '10-Q').
         date (str): The period ending date for the statement.
-        azure_result (AnalyzeResult): The raw object returned by get_raw_azure_data.
+        table_cells (list): Normalized table cells with 'row', 'column', and 'text' keys.
+        ticker (str): Stock ticker symbol (default: 'TBD').
 
     Returns:
         models.schemas.FinancialStatement: A fully validated Pydantic object 
-            ready for database insertion.
+            ready for downstream processing.
     """
     log_event(
         LOGGER,

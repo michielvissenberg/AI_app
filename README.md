@@ -1,14 +1,26 @@
-# Phase 1: research
+# Project description
+
+This repositiry contains a personal project in which I am making an AI application that can extract data from financial reports. That data will then be fed to an LLM, which will interpret it and make detailed investment cases based on the actual data gathered.
+
+## current implementation
+
+Currently Only the extraction of data and the calculation of some basic financial ratios is implemented.
+To run the data extractor, you should run pdf_parser/main.py with a provided financial report in pdf form and with the correct configuration parameters.
+To run the financial ratio calculator and clean up some of the extracted data, run financial_ratios/main.py with a json file containing the original output.
+
+# Plan
+
+## Phase 1: research
 
 what am i creating, what tech stack am i using, is it going to work?
 
 status: done
 
 - defined the scope: extract, normalize, and structure financial statement data from annual and quarterly reports
-- validated a python-first stack for pdf processing, data cleanup, and modular ratio calculations
+- validated a python stack for pdf processing, data cleanup, and modular ratio calculations
 - confirmed feasibility with sample filings and baseline output artifacts (.json + .md)
 
-# Phase 2: extracting data
+## Phase 2: extracting data
 
 how am i extracting data from pdfs, can i let an ai interpret the data?
 
@@ -20,33 +32,37 @@ status: mostly done
 - export clean machine-readable outputs for downstream computation
 - keep improving edge cases (for example duplicate fields in final json/markdown exports)
 
-# Phase 3: achitecture + database
+## Phase 3: achitecture + database
 
 how am i saving investing principles in a readable manner for ai and how am i using ai agents to connect
 this to the given pdf data?
 
 status: in progress (current main focus)
 
-1) market data enrichment
+1. market data enrichment
+
 - add a market data extractor (starting with yahoofinance via python)
 - ingest key market-linked inputs such as share_price, shares_outstanding, market_cap, total_debt, and cash_and_cash_equivalents
 - merge market data into the aggregated company json so statement + market context live together
 
-2) extended financial ratios
+2. extended financial ratios
+
 - compute additional valuation and market-aware ratios after enrichment (for example p/e, p/s, ev/sales, ev/ebit, and market-cap-based comparisons)
 - keep all ratio outputs traceable to explicit input fields
 - mark missing-input cases explicitly instead of inferring unknown values
 
-3) persistence layer for llm retrieval
+3. persistence layer for llm retrieval
+
 - persist enriched outputs in a retrieval-friendly store, with vector database as the preferred target
 - store both structured numeric fields and chunked textual context so an llm can retrieve facts + narrative together
 - keep provenance metadata (ticker, period, report type, extraction run metadata, source labels) so analysis is auditable
 
-4) llm analysis workflow
+4. llm analysis workflow
+
 - build a retrieval + analysis pipeline that pulls company-specific numeric and textual evidence
 - generate structured analysis sections (profitability, leverage, liquidity, growth, valuation, risk signals)
 - require evidence-backed conclusions with explicit field/ratio references and clear unknown/missing-data handling
 
-# Phase 4: UI
+## Phase 4: UI
 
 how am i letting users upload their data to the app and letting them interact with the analyses

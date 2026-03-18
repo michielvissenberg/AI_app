@@ -7,7 +7,6 @@ Goal:
 - Return a clean dictionary for ratio calculations
 
 """
-# later wil ik er ook voor zorgen dat de yoy change en misschien ook de kolommen met data meekomen !!!!!!!
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from models.models import AggregatedMetric

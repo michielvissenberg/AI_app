@@ -1,18 +1,17 @@
 import argparse
 import json
 import logging
-import os
 from collections import defaultdict
 from pathlib import Path
 from dotenv import load_dotenv
 
 from models.schemas import FinancialStatement
-from processors.azure_engine import extract_financial_tables as extract_financial_tables_azure
 from processors.docling_engine import extract_financial_tables
 from processors.error_handling import ErrorCode, PipelineError, configure_logger, log_event
 from processors.mapper import map_table_cells_to_statement
 """
-example use: pdf_parser/main.py --pdf data/AAPL.pdf --engine docling --docling-device cuda --company "Apple Inc." --ticker AAPL --report-type 10-K --period-ending 2025-09-27 --output-dir data
+example use: 
+python .\pdf_parser\main.py --pdf .\data_raw\DUOL.pdf --engine docling --docling-device cuda --company "Duolingo" --ticker DUOL --report-type 10-K --period-ending 2025-12-31 --output-dir .\data_raw\ 
 """
 
 LOGGER = configure_logger(__name__)
@@ -81,28 +80,12 @@ def extract(
                 cause=exc,
             ) from exc
 
-    if not os.getenv("AZURE_ENDPOINT") or not os.getenv("AZURE_KEY"):
-        raise PipelineError(
-            ErrorCode.CONFIGURATION_ERROR,
-            "Azure engine requires AZURE_ENDPOINT and AZURE_KEY in environment.",
-            recoverable=False,
-            context={"engine": engine},
-        )
-
-    try:
-        extracted = extract_financial_tables_azure(pdf_path)
-        log_event(LOGGER, logging.INFO, "pipeline_extract_completed", engine=engine, cells=len(extracted))
-        return extracted
-    except PipelineError:
-        raise
-    except Exception as exc:
-        raise PipelineError(
-            ErrorCode.EXTRACTION_ERROR,
-            "Azure extraction failed in pipeline extract stage.",
-            recoverable=True,
-            context={"engine": engine, "pdf_path": pdf_path},
-            cause=exc,
-        ) from exc
+    raise PipelineError(
+        ErrorCode.CONFIGURATION_ERROR,
+        "Only docling engine is supported in this pipeline.",
+        recoverable=False,
+        context={"engine": engine},
+    )
 
 
 def normalize(extracted_data, engine: str):
@@ -195,6 +178,7 @@ _PREFERRED_STATEMENT_TYPE_BY_LABEL = {
 
 
 def _label_confidence_score(item) -> int:
+    """Scores the confidence level of a normalized label match."""
     normalized_label = (item.normalized_label or "").strip().lower()
     raw_label = (item.label or "").strip().lower()
 
@@ -206,6 +190,7 @@ def _label_confidence_score(item) -> int:
 
 
 def _dedup_group_key(item):
+    """Builds a grouping key for identifying duplicate statement items."""
     normalized_label = (item.normalized_label or "").strip().lower()
     fallback_label = (item.label or "").strip().lower()
     statement_type = item.statement_type or "unclassified"
@@ -225,6 +210,7 @@ def _dedup_group_key(item):
 
 
 def _dedup_candidate_score(item):
+    """Ranks an item candidate within a duplicate group for selection as the winner."""
     preferred_statement_type = _PREFERRED_STATEMENT_TYPE_BY_LABEL.get((item.normalized_label or "").strip().lower())
     statement_type = item.statement_type or ""
     parse_status = (item.parse_status or "").strip().lower()
@@ -266,6 +252,7 @@ def _dedup_candidate_score(item):
 
 
 def _summarize_candidate(index, item):
+    """Extracts and summarizes key fields from a candidate item for diagnostic reporting."""
     return {
         "source_index": index,
         "label": item.label,
@@ -547,7 +534,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run financial PDF parsing pipeline.")
     parser.add_argument("--pdf", default=str(project_root / "data" / "testdocument.pdf"))
-    parser.add_argument("--engine", choices=["docling", "azure"], default="docling")
+    parser.add_argument("--engine", choices=["docling"], default="docling")
     parser.add_argument("--company", default="Unknown Company")
     parser.add_argument("--ticker", default="TBD")
     parser.add_argument("--report-type", default="10-K")
