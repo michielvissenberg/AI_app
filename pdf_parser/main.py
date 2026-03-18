@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+from collections import defaultdict
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -165,17 +166,210 @@ def validate(statement: FinancialStatement) -> FinancialStatement:
         ) from exc
 
 
-def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
+_STATEMENT_EXPORT_ORDER = {
+    "income_statement": 0,
+    "balance_sheet": 1,
+    "cash_flow_statement": 2,
+    "equity_statement": 3,
+    "unclassified": 4,
+}
+
+
+_PREFERRED_STATEMENT_TYPE_BY_LABEL = {
+    "revenue": "income_statement",
+    "gross_profit": "income_statement",
+    "operating_income": "income_statement",
+    "net_income": "income_statement",
+    "total_assets": "balance_sheet",
+    "total_liabilities": "balance_sheet",
+    "total_current_assets": "balance_sheet",
+    "total_current_liabilities": "balance_sheet",
+    "cash_and_cash_equivalents": "balance_sheet",
+    "accounts_receivable_net": "balance_sheet",
+    "marketable_securities": "balance_sheet",
+    "total_shareholders_equity": "balance_sheet",
+    "net_cash_from_operating_activities": "cash_flow_statement",
+    "net_cash_from_investing_activities": "cash_flow_statement",
+    "net_cash_from_financing_activities": "cash_flow_statement",
+}
+
+
+def _label_confidence_score(item) -> int:
+    normalized_label = (item.normalized_label or "").strip().lower()
+    raw_label = (item.label or "").strip().lower()
+
+    if not normalized_label:
+        return 0
+    if normalized_label == raw_label:
+        return 1
+    return 2
+
+
+def _dedup_group_key(item):
+    normalized_label = (item.normalized_label or "").strip().lower()
+    fallback_label = (item.label or "").strip().lower()
+    statement_type = item.statement_type or "unclassified"
+    current_period_label = (item.current_period_label or "").strip().lower()
+    prior_period_label = (item.prior_period_label or "").strip().lower()
+    current_period_column = item.current_period_column if item.current_period_column is not None else -1
+    prior_period_column = item.prior_period_column if item.prior_period_column is not None else -1
+
+    return (
+        normalized_label if normalized_label else fallback_label,
+        statement_type,
+        current_period_label,
+        prior_period_label,
+        current_period_column,
+        prior_period_column,
+    )
+
+
+def _dedup_candidate_score(item):
+    preferred_statement_type = _PREFERRED_STATEMENT_TYPE_BY_LABEL.get((item.normalized_label or "").strip().lower())
+    statement_type = item.statement_type or ""
+    parse_status = (item.parse_status or "").strip().lower()
+
+    points = 0
+    if parse_status == "ok":
+        points += 4
+    elif parse_status in {"ambiguous", "parse_error"}:
+        points -= 2
+
+    has_current = item.current_period_value is not None
+    has_prior = item.prior_period_value is not None
+    if has_current:
+        points += 5
+    if has_prior:
+        points += 3
+
+    points += _label_confidence_score(item) * 2
+
+    preferred_rank = 1
+    if preferred_statement_type:
+        if statement_type == preferred_statement_type:
+            points += 4
+            preferred_rank = 1
+        else:
+            points -= 4
+            preferred_rank = 0
+
+    fallback_value = item.current_period_value if item.current_period_value is not None else item.value
+    magnitude = abs(float(fallback_value)) if fallback_value not in (None, "") else 0.0
+
+    return (
+        preferred_rank,
+        points,
+        int(has_current),
+        int(has_prior),
+        magnitude,
+    )
+
+
+def _summarize_candidate(index, item):
+    return {
+        "source_index": index,
+        "label": item.label,
+        "normalized_label": item.normalized_label,
+        "statement_type": item.statement_type,
+        "parse_status": item.parse_status,
+        "current_period_value": item.current_period_value,
+        "prior_period_value": item.prior_period_value,
+    }
+
+
+def _deduplicate_statement_items(statement: FinancialStatement):
+    """Deduplicates statement items and returns diagnostics for collision groups."""
+    grouped = defaultdict(list)
+    for idx, item in enumerate(statement.items):
+        grouped[_dedup_group_key(item)].append((idx, item))
+
+    deduped_items = []
+    duplicate_collisions = []
+
+    for group_key, group_entries in grouped.items():
+        if len(group_entries) == 1:
+            deduped_items.append(group_entries[0][1])
+            continue
+
+        winner_index, winner_item = max(group_entries, key=lambda entry: _dedup_candidate_score(entry[1]))
+        deduped_items.append(winner_item)
+
+        rejected = [
+            _summarize_candidate(index=idx, item=item)
+            for idx, item in group_entries
+            if idx != winner_index
+        ]
+
+        duplicate_collisions.append(
+            {
+                "group_key": {
+                    "label": group_key[0],
+                    "statement_type": group_key[1],
+                    "current_period_label": group_key[2],
+                    "prior_period_label": group_key[3],
+                    "current_period_column": group_key[4],
+                    "prior_period_column": group_key[5],
+                },
+                "collision_count": len(group_entries),
+                "winner": _summarize_candidate(index=winner_index, item=winner_item),
+                "rejected_candidates": rejected,
+            }
+        )
+
+    deduped_statement = statement.model_copy(update={"items": deduped_items})
+    diagnostics = {
+        "total_items_before": len(statement.items),
+        "total_items_after": len(deduped_items),
+        "duplicates_removed": len(statement.items) - len(deduped_items),
+        "collision_groups": len(duplicate_collisions),
+        "collisions": duplicate_collisions,
+    }
+
+    return deduped_statement, diagnostics
+
+
+def _item_export_sort_key(item):
+    """Builds a deterministic sort key for stable JSON/markdown exports."""
+    statement_type = item.statement_type if item.statement_type in _STATEMENT_EXPORT_ORDER else "unclassified"
+    normalized_label = (item.normalized_label or "").strip().lower()
+    raw_label = (item.label or "").strip().lower()
+    current_period_label = (item.current_period_label or "").strip().lower()
+    prior_period_label = (item.prior_period_label or "").strip().lower()
+    current_period_column = item.current_period_column if item.current_period_column is not None else 10**6
+    prior_period_column = item.prior_period_column if item.prior_period_column is not None else 10**6
+    parse_status = (item.parse_status or "").strip().lower()
+
+    return (
+        _STATEMENT_EXPORT_ORDER[statement_type],
+        normalized_label,
+        raw_label,
+        current_period_label,
+        prior_period_label,
+        current_period_column,
+        prior_period_column,
+        parse_status,
+    )
+
+
+def _sorted_statement_for_export(statement: FinancialStatement) -> FinancialStatement:
+    """Returns a copy of statement with a deterministic item order for export."""
+    sorted_items = sorted(statement.items, key=_item_export_sort_key)
+    return statement.model_copy(update={"items": sorted_items})
+
+
+def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path, duplicate_diagnostics=None):
     """Exports canonical JSON and compact markdown narrative outputs."""
     output_dir.mkdir(parents=True, exist_ok=True)
     base_name = source_pdf.stem
+    export_statement = _sorted_statement_for_export(statement)
 
     json_path = output_dir / f"{base_name}_statement.json"
     markdown_path = output_dir / f"{base_name}_statement.md"
+    diagnostics_path = output_dir / f"{base_name}_duplicate_diagnostics.json"
 
     try:
         with open(json_path, "w", encoding="utf-8") as handle:
-            json.dump(statement.model_dump(mode="json"), handle, indent=2)
+            json.dump(export_statement.model_dump(mode="json"), handle, indent=2)
     except Exception as exc:
         raise PipelineError(
             ErrorCode.EXPORT_ERROR,
@@ -194,7 +388,7 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
     }
 
     grouped_items = {key: [] for key in statement_sections.keys()}
-    for item in statement.items:
+    for item in export_statement.items:
         section_key = item.statement_type if item.statement_type in statement_sections else "unclassified"
         grouped_items[section_key].append(item)
 
@@ -272,16 +466,30 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path):
             cause=exc,
         ) from exc
 
+    if duplicate_diagnostics is not None:
+        try:
+            with open(diagnostics_path, "w", encoding="utf-8") as handle:
+                json.dump(duplicate_diagnostics, handle, indent=2)
+        except Exception as exc:
+            raise PipelineError(
+                ErrorCode.EXPORT_ERROR,
+                "Failed to write duplicate diagnostics output.",
+                recoverable=False,
+                context={"diagnostics_path": str(diagnostics_path)},
+                cause=exc,
+            ) from exc
+
     log_event(
         LOGGER,
         logging.INFO,
         "pipeline_export_completed",
         json_path=str(json_path),
         markdown_path=str(markdown_path),
-        items=len(statement.items),
+        diagnostics_path=str(diagnostics_path),
+        items=len(export_statement.items),
     )
 
-    return json_path, markdown_path
+    return json_path, markdown_path, diagnostics_path
 
 
 def run_pipeline(
@@ -318,8 +526,16 @@ def run_pipeline(
     normalized_cells = normalize(extracted, engine)
     mapped_statement = map_statement(company_name, ticker, report_type, period_ending, normalized_cells)
     validated_statement = validate(mapped_statement)
-    outputs = export(validated_statement, output_dir, pdf_path)
-    log_event(LOGGER, logging.INFO, "pipeline_completed", json_path=str(outputs[0]), markdown_path=str(outputs[1]))
+    deduped_statement, dedup_diagnostics = _deduplicate_statement_items(validated_statement)
+    outputs = export(deduped_statement, output_dir, pdf_path, duplicate_diagnostics=dedup_diagnostics)
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "pipeline_completed",
+        json_path=str(outputs[0]),
+        markdown_path=str(outputs[1]),
+        diagnostics_path=str(outputs[2]),
+    )
     return outputs
 
 
@@ -352,7 +568,7 @@ def main():
         )
 
     try:
-        json_path, markdown_path = run_pipeline(
+        json_path, markdown_path, diagnostics_path = run_pipeline(
             pdf_path=pdf_path,
             engine=args.engine,
             company_name=args.company,
@@ -368,6 +584,7 @@ def main():
         print("Pipeline completed successfully.")
         print(f"JSON export: {json_path}")
         print(f"Markdown export: {markdown_path}")
+        print(f"Duplicate diagnostics export: {diagnostics_path}")
     except PipelineError as exc:
         log_event(LOGGER, logging.ERROR, "pipeline_failed", **exc.to_dict())
         print(f"Pipeline failed [{exc.code.value}]: {exc.message}")

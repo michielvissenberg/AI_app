@@ -56,11 +56,19 @@ These must all pass before Stage B starts:
 - `pdf_parser/main.py`
 - `pdf_parser/models/schemas.py`
 - `financial_ratios/scripts/aggregator.py`
+- `pdf_parser/scripts/freeze_stage_a_baseline.py`
+- `plan/extraction_contract.md`
+
+**Reproducible baseline command**
+
+```powershell
+python pdf_parser/scripts/freeze_stage_a_baseline.py --output-dir baselines/stage_a_ws1
+```
 
 **Exit checks**
 
 - Baseline artifacts are stored and reproducible from a documented command path.
-- Extraction contract is documented and linked from the global plan.
+- Extraction contract is documented in `plan/extraction_contract.md` and linked from the global plan.
 
 ---
 

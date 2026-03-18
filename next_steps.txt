@@ -1,0 +1,5 @@
+global TODO's
+
+- add a market data extractor (for share_price, shares_outstanding, market_cap, total_debt, cash_and_cash_equivalents, ...)
+- add market data to JSON input of aggregator to make one compressed data JSON file
+- compute extra ratios 
