@@ -101,6 +101,15 @@ DEFAULT_EXPECTED_CASES: List[Dict[str, Any]] = [
 ]
 
 
+DEFAULT_NUMERIC_TOLERANCE = 0.005
+
+DEFAULT_GATE_THRESHOLDS: Dict[str, float] = {
+	"statement_detection_accuracy": 97.0,
+	"line_item_mapping_accuracy": 97.0,
+	"numeric_parse_accuracy": 99.0,
+}
+
+
 def _safe_lower(value: Optional[str]) -> str:
 	"""Normalizes optional string input to lowercase for matching operations."""
 	return (value or "").strip().lower()
@@ -366,6 +375,78 @@ def evaluate_statement(
 	}
 
 
+def _evaluate_quality_gate(
+	measured_kpis: Dict[str, float],
+	thresholds: Dict[str, float],
+	coverage: Dict[str, Any],
+	expected_cases_missing: bool,
+) -> Dict[str, Any]:
+	"""Applies KPI gate thresholds and returns pass/fail verdict with reasons."""
+	blocking_reasons: List[str] = []
+
+	for metric_name, threshold_value in thresholds.items():
+		measured_value = float(measured_kpis.get(metric_name, 0.0))
+		if measured_value < threshold_value:
+			blocking_reasons.append(
+				f"{metric_name} below threshold: measured={measured_value:.2f}, required={threshold_value:.2f}"
+			)
+
+	matched_cases = int(coverage.get("matched_cases", 0) or 0)
+	expected_cases = int(coverage.get("expected_cases", 0) or 0)
+	if expected_cases == 0:
+		blocking_reasons.append("No expected benchmark cases were provided.")
+	elif matched_cases == 0:
+		blocking_reasons.append("No expected benchmark cases were matched in extracted output.")
+
+	if expected_cases_missing:
+		blocking_reasons.append("Expected benchmark file is missing for this filing.")
+
+	verdict = "pass" if not blocking_reasons else "fail"
+	return {
+		"thresholds": thresholds,
+		"measured": measured_kpis,
+		"verdict": verdict,
+		"blocking_reasons": blocking_reasons,
+	}
+
+
+def build_evaluation_report(
+	extracted_statement: Dict[str, Any],
+	expected_cases: List[Dict[str, Any]],
+	tolerance: float,
+	thresholds: Dict[str, float],
+	expected_cases_missing: bool = False,
+) -> Dict[str, Any]:
+	"""Builds full evaluation report including gate config, measured KPIs, and verdict."""
+	base_report = evaluate_statement(extracted_statement, expected_cases, tolerance)
+	gate_result = _evaluate_quality_gate(
+		measured_kpis=base_report["kpis"],
+		thresholds=thresholds,
+		coverage=base_report["coverage"],
+		expected_cases_missing=expected_cases_missing,
+	)
+
+	return {
+		"sample": base_report["sample"],
+		"coverage": base_report["coverage"],
+		"evaluation_config": {
+			"numeric_tolerance": tolerance,
+			"gate_thresholds": thresholds,
+		},
+		"kpis": {
+			"measured": base_report["kpis"],
+			"thresholds": gate_result["thresholds"],
+		},
+		"gate": {
+			"verdict": gate_result["verdict"],
+			"blocking_reasons": gate_result["blocking_reasons"],
+		},
+		"raw_counts": base_report["raw_counts"],
+		"alignment_warnings": base_report["alignment_warnings"],
+		"mismatches": base_report["mismatches"],
+	}
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
 	"""Builds CLI argument parsing for the evaluation harness."""
 	project_root = Path(__file__).resolve().parents[2]
@@ -383,8 +464,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
 	parser.add_argument(
 		"--tolerance",
 		type=float,
-		default=0.005,
+		default=DEFAULT_NUMERIC_TOLERANCE,
 		help="Relative tolerance for numeric comparisons (default: 0.005 = 0.5%%).",
+	)
+	parser.add_argument(
+		"--statement-threshold",
+		type=float,
+		default=DEFAULT_GATE_THRESHOLDS["statement_detection_accuracy"],
+		help="Minimum statement detection accuracy gate in percent.",
+	)
+	parser.add_argument(
+		"--mapping-threshold",
+		type=float,
+		default=DEFAULT_GATE_THRESHOLDS["line_item_mapping_accuracy"],
+		help="Minimum line-item mapping accuracy gate in percent.",
+	)
+	parser.add_argument(
+		"--numeric-threshold",
+		type=float,
+		default=DEFAULT_GATE_THRESHOLDS["numeric_parse_accuracy"],
+		help="Minimum numeric parse accuracy gate in percent.",
 	)
 	parser.add_argument(
 		"--output",
@@ -394,8 +493,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 	return parser
 
 
-def main() -> None:
-	"""Runs the evaluation harness and prints KPI summary output."""
+def main() -> int:
+	"""Runs the evaluation harness, writes report artifact, and enforces gate verdict."""
 	parser = build_arg_parser()
 	args = parser.parse_args()
 
@@ -407,10 +506,24 @@ def main() -> None:
 
 	extracted_statement = _load_json(actual_path)
 	expected_cases = load_expected_cases(expected_path)
-	report = evaluate_statement(extracted_statement, expected_cases, args.tolerance)
+	thresholds = {
+		"statement_detection_accuracy": float(args.statement_threshold),
+		"line_item_mapping_accuracy": float(args.mapping_threshold),
+		"numeric_parse_accuracy": float(args.numeric_threshold),
+	}
+	report = build_evaluation_report(
+		extracted_statement=extracted_statement,
+		expected_cases=expected_cases,
+		tolerance=float(args.tolerance),
+		thresholds=thresholds,
+	)
 
 	print("Evaluation complete")
-	print(json.dumps(report["kpis"], indent=2))
+	print(json.dumps(report["kpis"]["measured"], indent=2))
+	print(f"Gate verdict: {report['gate']['verdict']}")
+	if report["gate"]["blocking_reasons"]:
+		for reason in report["gate"]["blocking_reasons"]:
+			print(f"- {reason}")
 
 	if args.output:
 		output_path = Path(args.output)
@@ -418,6 +531,12 @@ def main() -> None:
 		with open(output_path, "w", encoding="utf-8") as handle:
 			json.dump(report, handle, indent=2)
 		print(f"Detailed report written: {output_path}")
+
+	return 0 if report["gate"]["verdict"] == "pass" else 1
+
+
+if __name__ == "__main__":
+	raise SystemExit(main())
 
 
 if __name__ == "__main__":

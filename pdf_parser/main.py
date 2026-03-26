@@ -177,6 +177,9 @@ _PREFERRED_STATEMENT_TYPE_BY_LABEL = {
 }
 
 
+_CRITICAL_KPI_ANCHORS = {"revenue", "net_income", "total_assets"}
+
+
 def _label_confidence_score(item) -> int:
     """Scores the confidence level of a normalized label match."""
     normalized_label = (item.normalized_label or "").strip().lower()
@@ -258,10 +261,22 @@ def _summarize_candidate(index, item):
         "label": item.label,
         "normalized_label": item.normalized_label,
         "statement_type": item.statement_type,
+        "statement_type_confidence": item.statement_type_confidence,
+        "period_alignment_confidence": item.period_alignment_confidence,
+        "period_alignment_warning": item.period_alignment_warning,
         "parse_status": item.parse_status,
         "current_period_value": item.current_period_value,
         "prior_period_value": item.prior_period_value,
     }
+
+
+def _is_high_confidence_anchor_candidate(item) -> bool:
+    """Returns True when an item can participate in anchor winner selection."""
+    return (
+        (item.statement_type_confidence or "") == "high"
+        and (item.period_alignment_confidence or "") == "high"
+        and (item.parse_status or "") != "ambiguous"
+    )
 
 
 def _deduplicate_statement_items(statement: FinancialStatement):
@@ -274,11 +289,20 @@ def _deduplicate_statement_items(statement: FinancialStatement):
     duplicate_collisions = []
 
     for group_key, group_entries in grouped.items():
-        if len(group_entries) == 1:
-            deduped_items.append(group_entries[0][1])
+        label_key = (group_key[0] or "").strip().lower()
+        eligible_entries = group_entries
+        if label_key in _CRITICAL_KPI_ANCHORS:
+            high_confidence_entries = [
+                entry for entry in group_entries if _is_high_confidence_anchor_candidate(entry[1])
+            ]
+            if high_confidence_entries:
+                eligible_entries = high_confidence_entries
+
+        if len(eligible_entries) == 1:
+            deduped_items.append(eligible_entries[0][1])
             continue
 
-        winner_index, winner_item = max(group_entries, key=lambda entry: _dedup_candidate_score(entry[1]))
+        winner_index, winner_item = max(eligible_entries, key=lambda entry: _dedup_candidate_score(entry[1]))
         deduped_items.append(winner_item)
 
         rejected = [
@@ -397,7 +421,7 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path, du
         "",
         "## Narrative Format",
         "",
-        "Each metric line uses: canonical_label | raw_label | unit | scale | current | prior | yoy | parse_status",
+        "Each metric line uses: canonical_label | raw_label | unit | scale | current | prior | yoy | parse_status | statement_confidence | period_confidence",
     ]
 
     for section_key, section_title in statement_sections.items():
@@ -421,6 +445,9 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path, du
             yoy_value = _format_number(item.yoy_change)
             yoy_unit = _escape_markdown_cell(item.yoy_unit or "")
             parse_status = _escape_markdown_cell(item.parse_status or "")
+            statement_confidence = _escape_markdown_cell(item.statement_type_confidence or "")
+            period_confidence = _escape_markdown_cell(item.period_alignment_confidence or "")
+            period_warning = _escape_markdown_cell(item.period_alignment_warning or "")
 
             period_meta = []
             if item.current_period_label:
@@ -438,8 +465,13 @@ def export(statement: FinancialStatement, output_dir: Path, source_pdf: Path, du
                 "- "
                 f"{canonical_label} | raw={raw_label} | unit={unit} | scale={scale} "
                 f"| current={current_value} | prior={prior_value} "
-                f"| yoy={yoy_value}{yoy_unit if yoy_unit else ''} | parse_status={parse_status}{period_meta_text}"
+                f"| yoy={yoy_value}{yoy_unit if yoy_unit else ''} | parse_status={parse_status} "
+                f"| statement_confidence={statement_confidence} | period_confidence={period_confidence}"
+                f"{period_meta_text}"
             )
+
+            if period_warning:
+                markdown_lines.append(f"  warning: {period_warning}")
 
     try:
         with open(markdown_path, "w", encoding="utf-8") as handle:
