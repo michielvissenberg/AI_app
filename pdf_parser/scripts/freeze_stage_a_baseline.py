@@ -27,6 +27,7 @@ REQUIRED_BASELINE_FILES = [
 
 
 def _sha256(path: Path) -> str:
+    """Computes SHA256 checksum of a file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(8192), b""):
@@ -35,6 +36,7 @@ def _sha256(path: Path) -> str:
 
 
 def _copy_required_files(project_root: Path, output_dir: Path) -> List[Dict[str, str]]:
+    """Copies required baseline files to output directory and records checksums."""
     copied_files: List[Dict[str, str]] = []
 
     for relative_file in REQUIRED_BASELINE_FILES:
@@ -57,6 +59,7 @@ def _copy_required_files(project_root: Path, output_dir: Path) -> List[Dict[str,
 
 
 def run(output_dir: Path) -> Path:
+    """Freezes baseline artifacts and writes manifest with checksums."""
     project_root = Path(__file__).resolve().parents[2]
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -77,6 +80,7 @@ def run(output_dir: Path) -> Path:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """Builds CLI argument parser for baseline freeze script."""
     parser = argparse.ArgumentParser(description="Freeze Stage A Workstream 1 baseline artifacts.")
     parser.add_argument(
         "--output-dir",
@@ -87,6 +91,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """CLI entrypoint for freezing Stage A baseline artifacts."""
     parser = build_arg_parser()
     args = parser.parse_args()
 

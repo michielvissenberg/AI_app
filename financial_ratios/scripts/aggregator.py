@@ -7,7 +7,6 @@ Goal:
 - Return a clean dictionary for ratio calculations
 
 """
-# later wil ik er ook voor zorgen dat de yoy change en misschien ook de kolommen met data meekomen !!!!!!!
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from models.models import AggregatedMetric
@@ -32,6 +31,9 @@ PREFERRED_STATEMENT_TYPE_BY_LABEL = {
     "net_cash_from_investing_activities": "cash_flow_statement",
     "net_cash_from_financing_activities": "cash_flow_statement",
 }
+
+
+CRITICAL_KPI_ANCHORS = {"revenue", "net_income", "total_assets"}
 
 def aggregate_statement_items(statement_json_path: Path) -> Dict[str, AggregatedMetric]:
     """Main entrypoint used by callers.
@@ -111,6 +113,9 @@ def _resolve_duplicates(
                     "winner": {
                         "source_label": best_item.get("label"),
                         "statement_type": best_item.get("statement_type"),
+                        "statement_type_confidence": best_item.get("statement_type_confidence"),
+                        "period_alignment_confidence": best_item.get("period_alignment_confidence"),
+                        "period_alignment_warning": best_item.get("period_alignment_warning"),
                         "parse_status": best_item.get("parse_status"),
                         "current_period_value": best_item.get("current_period_value"),
                         "prior_period_value": best_item.get("prior_period_value"),
@@ -119,6 +124,9 @@ def _resolve_duplicates(
                         {
                             "source_label": item.get("label"),
                             "statement_type": item.get("statement_type"),
+                            "statement_type_confidence": item.get("statement_type_confidence"),
+                            "period_alignment_confidence": item.get("period_alignment_confidence"),
+                            "period_alignment_warning": item.get("period_alignment_warning"),
                             "parse_status": item.get("parse_status"),
                             "current_period_value": item.get("current_period_value"),
                             "prior_period_value": item.get("prior_period_value"),
@@ -138,6 +146,18 @@ def _resolve_duplicates(
 
 def _pick_best_duplicate(entries: List[Dict[str, Any]], normalized_label: str) -> Dict[str, Any]:
     preferred_statement_type = PREFERRED_STATEMENT_TYPE_BY_LABEL.get(normalized_label)
+    candidate_entries = entries
+
+    if normalized_label in CRITICAL_KPI_ANCHORS:
+        high_confidence_entries = [
+            item
+            for item in entries
+            if str(item.get("statement_type_confidence", "")) == "high"
+            and str(item.get("period_alignment_confidence", "")) == "high"
+            and str(item.get("parse_status", "")).lower() != "ambiguous"
+        ]
+        if high_confidence_entries:
+            candidate_entries = high_confidence_entries
 
     def score(item: Dict[str, Any]) -> tuple[int, int, int, int, float]:
         points = 0
@@ -173,7 +193,7 @@ def _pick_best_duplicate(entries: List[Dict[str, Any]], normalized_label: str) -
 
         return preferred_match_rank, points, int(has_current_period_value), int(has_prior_period_value), magnitude
 
-    return max(entries, key=score)
+    return max(candidate_entries, key=score)
 
 def _clean_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """remove noise entries in the data"""

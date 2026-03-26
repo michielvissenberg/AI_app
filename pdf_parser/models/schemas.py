@@ -24,6 +24,18 @@ class FinancialLineItem(BaseModel):
     prior_period_label: Optional[str] = None
     current_period_column: Optional[int] = None
     prior_period_column: Optional[int] = None
+    statement_type_confidence: Optional[str] = Field(
+        None,
+        description="Confidence in statement type assignment: high, low, ambiguous",
+    )
+    period_alignment_confidence: Optional[str] = Field(
+        None,
+        description="Confidence in current/prior period role assignment: high, low, ambiguous",
+    )
+    period_alignment_warning: Optional[str] = Field(
+        None,
+        description="Warning emitted when period-role mapping appears weak or ambiguous",
+    )
     supplemental_metrics: Optional[Dict[str, List[Optional[float]]]] = None
 
 

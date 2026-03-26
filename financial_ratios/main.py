@@ -8,6 +8,7 @@ from scripts.ratio_enricher import add_ratios_to_compressed_payload
 
 
 def _to_jsonable(data):
+	"""Recursively converts dataclasses and nested structures to JSON-serializable format."""
 	if is_dataclass(data):
 		return asdict(data)
 	if isinstance(data, dict):
@@ -18,12 +19,14 @@ def _to_jsonable(data):
 
 
 def parse_args() -> argparse.Namespace:
+	"""Parses CLI arguments for the statement aggregation and ratio computation pipeline."""
 	parser = argparse.ArgumentParser(description="Aggregate statement JSON into compressed JSON.")
 	parser.add_argument("input_path", help="Path to the input statement JSON file.")
 	return parser.parse_args()
 
 
 def main() -> int:
+	"""Aggregates statement items, computes financial ratios, and exports compressed payload with diagnostics."""
 	args = parse_args()
 	input_path = Path(args.input_path)
 	raw_statement_payload = json.loads(input_path.read_text(encoding="utf-8"))

@@ -3,7 +3,12 @@ import logging
 from typing import Dict, List, Optional
 
 from models.schemas import FinancialLineItem, FinancialStatement
-from processors.cleaners import is_percentage_value, normalize_label, parse_financial_value
+from processors.cleaners import (
+    is_percentage_value,
+    looks_like_supplemental_segment_label,
+    normalize_label,
+    parse_financial_value,
+)
 from processors.error_handling import configure_logger, log_event
 
 
@@ -88,6 +93,7 @@ CANONICAL_LINE_ITEM_RULES = {
 
 CURRENT_PERIOD_HINTS = {"current", "latest", "most recent", "this year", "current year"}
 PRIOR_PERIOD_HINTS = {"prior", "previous", "preceding", "last year", "prior year"}
+CRITICAL_KPI_ANCHORS = {"revenue", "net_income", "total_assets"}
 
 
 def _looks_like_data_value(value_text: str) -> bool:
@@ -412,6 +418,92 @@ def _infer_period_column_roles(rows: Dict[int, Dict[int, str]]) -> Dict[int, Dic
     return role_map
 
 
+def _assess_statement_type_confidence(
+    label_text: str,
+    context_statement_type: Optional[str],
+    row_statement_type: Optional[str],
+    effective_statement_type: Optional[str],
+) -> Dict[str, Optional[str]]:
+    """Assesses confidence in statement-type assignment and emits guard-rule warnings."""
+    if effective_statement_type is None:
+        return {
+            "statement_type": None,
+            "confidence": "low",
+            "warning": "No statement-type evidence found for row.",
+        }
+
+    if effective_statement_type == "balance_sheet" and looks_like_supplemental_segment_label(label_text):
+        return {
+            "statement_type": None,
+            "confidence": "ambiguous",
+            "warning": "Segment/product row matched balance-sheet context and was downgraded to unclassified.",
+        }
+
+    if row_statement_type and context_statement_type and row_statement_type != context_statement_type:
+        return {
+            "statement_type": effective_statement_type,
+            "confidence": "ambiguous",
+            "warning": "Row-level statement inference conflicts with surrounding section context.",
+        }
+
+    if row_statement_type or context_statement_type:
+        return {
+            "statement_type": effective_statement_type,
+            "confidence": "high",
+            "warning": None,
+        }
+
+    return {
+        "statement_type": effective_statement_type,
+        "confidence": "low",
+        "warning": "Statement type inferred without authoritative section markers.",
+    }
+
+
+def _assess_period_alignment_confidence(
+    value_columns: List[Dict[str, object]],
+    period_roles: Dict[int, Dict[str, Optional[str]]],
+) -> Dict[str, Optional[str]]:
+    """Scores current/prior period alignment confidence and emits ambiguity warnings."""
+    if not value_columns:
+        return {
+            "confidence": "low",
+            "warning": "No numeric value columns were extracted for period mapping.",
+        }
+
+    roles = []
+    for col in value_columns:
+        role = period_roles.get(col["column"], {}).get("role")
+        if role:
+            roles.append(role)
+
+    has_current = "current" in roles
+    has_prior = "prior" in roles
+
+    if has_current and has_prior:
+        return {"confidence": "high", "warning": None}
+
+    if len(value_columns) == 1 and has_current:
+        return {"confidence": "high", "warning": None}
+
+    if len(value_columns) > 1 and not roles:
+        return {
+            "confidence": "ambiguous",
+            "warning": "Period header evidence is weak; current/prior assignment was heuristic-only.",
+        }
+
+    if len(value_columns) > 1 and (has_current ^ has_prior):
+        return {
+            "confidence": "low",
+            "warning": "Only one period role was detected across multiple value columns.",
+        }
+
+    return {
+        "confidence": "low",
+        "warning": "Period role assignment confidence is low due to limited header evidence.",
+    }
+
+
 def _resolve_period_values(
     value_columns: List[Dict[str, object]],
     period_roles: Dict[int, Dict[str, Optional[str]]],
@@ -502,21 +594,22 @@ def _resolve_period_values(
 
 def map_table_cells_to_statement(company_name, report_type, date, table_cells, ticker="TBD"):
     """
-    Iterates through Azure analysis results to populate a validated FinancialStatement.
+    Maps normalized table cells into a validated FinancialStatement domain model.
 
-    This function filters through the 'azure_result' tables, cleans each row's 
-    values using the cleaner utilities, and initializes Pydantic models (FinancialLineItem).
-    It ensures that the final object adheres to the project's 'Golden Standard' schema.
+    Processes extracted table cells from any engine (Docling, Azure, etc.), classifies 
+    statement types and line items, infers column periods, cleans values using cleaners,
+    and constructs FinancialLineItem objects conforming to the Golden Standard schema.
 
     Args:
         company_name (str): Name of the entity (e.g., 'Apple Inc.').
         report_type (str): Type of filing (e.g., '10-K' or '10-Q').
         date (str): The period ending date for the statement.
-        azure_result (AnalyzeResult): The raw object returned by get_raw_azure_data.
+        table_cells (list): Normalized table cells with 'row', 'column', and 'text' keys.
+        ticker (str): Stock ticker symbol (default: 'TBD').
 
     Returns:
         models.schemas.FinancialStatement: A fully validated Pydantic object 
-            ready for database insertion.
+            ready for downstream processing.
     """
     log_event(
         LOGGER,
@@ -590,10 +683,18 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
 
         row_level_statement_type = _infer_statement_type_from_label_rules(label_text)
         effective_statement_type = row_level_statement_type or inferred_statement_type
+        statement_type_assessment = _assess_statement_type_confidence(
+            label_text=label_text,
+            context_statement_type=inferred_statement_type,
+            row_statement_type=row_level_statement_type,
+            effective_statement_type=effective_statement_type,
+        )
+        effective_statement_type = statement_type_assessment["statement_type"]
 
         primary_column = value_columns[0]
         period_values = _resolve_period_values(value_columns, inferred_period_roles)
         canonical_label = _classify_canonical_label(label_text, effective_statement_type)
+        period_alignment_assessment = _assess_period_alignment_confidence(value_columns, inferred_period_roles)
         column_values = [col["value"] for col in value_columns]
         column_units = [col["unit"] for col in value_columns]
         column_scales = [col["scale"] for col in value_columns]
@@ -604,6 +705,13 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
         if len(value_columns) > 1 and value_columns[1]["unit"] == "%":
             yoy_change = value_columns[1]["value"]
             yoy_unit = "%"
+
+        parse_status = primary_column["parse_status"]
+        if canonical_label in CRITICAL_KPI_ANCHORS and (
+            statement_type_assessment["confidence"] != "high"
+            or period_alignment_assessment["confidence"] != "high"
+        ):
+            parse_status = "ambiguous"
 
         item = FinancialLineItem(
             label=label_text,
@@ -616,7 +724,7 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
             column_units=column_units,
             column_scales=column_scales,
             column_parse_statuses=column_parse_statuses,
-            parse_status=primary_column["parse_status"],
+            parse_status=parse_status,
             yoy_change=yoy_change,
             yoy_unit=yoy_unit,
             current_period_value=period_values["current_period_value"],
@@ -625,6 +733,13 @@ def map_table_cells_to_statement(company_name, report_type, date, table_cells, t
             prior_period_label=period_values["prior_period_label"],
             current_period_column=period_values["current_period_column"],
             prior_period_column=period_values["prior_period_column"],
+            statement_type_confidence=statement_type_assessment["confidence"],
+            period_alignment_confidence=period_alignment_assessment["confidence"],
+            period_alignment_warning=(
+                statement_type_assessment["warning"]
+                if statement_type_assessment["warning"]
+                else period_alignment_assessment["warning"]
+            ),
         )
         line_items.append(item)
 

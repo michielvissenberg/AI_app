@@ -129,6 +129,7 @@ def _raw_items(raw_statement_payload: Dict[str, Any]) -> Iterable[Dict[str, Any]
 
 
 def _raw_candidate_score(item: Dict[str, Any]) -> tuple[int, int, float]:
+	"""Scores raw fallback candidates to prefer reliable current-period metric rows."""
 	points = 0
 
 	if str(item.get("parse_status", "")).lower() == "ok":
@@ -151,6 +152,7 @@ def _raw_candidate_score(item: Dict[str, Any]) -> tuple[int, int, float]:
 
 
 def _coerce_float(value: Any) -> Optional[float]:
+	"""Safely coerces a value to float, returning None when conversion fails."""
 	if value is None:
 		return None
 	try:

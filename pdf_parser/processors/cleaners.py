@@ -17,6 +17,22 @@ MISSING_MARKERS = {
     "--",
 }
 
+
+SUPPLEMENTAL_SEGMENT_TERMS = {
+    "segment",
+    "segments",
+    "geographic",
+    "geography",
+    "product",
+    "products",
+    "region",
+    "regional",
+    "category",
+    "categories",
+    "business_unit",
+    "channel",
+}
+
 def _normalize_raw(raw_value: str) -> str:
     """Normalizes raw cell text to a lowercase trimmed token."""
     return (raw_value or "").strip().lower()
@@ -109,6 +125,35 @@ def parse_financial_value(raw_value: str):
 def clean_financial_value(raw_value: str):
     """Compatibility wrapper that returns only the parsed numeric value."""
     return parse_financial_value(raw_value)["value"]
+
+
+def looks_like_supplemental_segment_label(label: str) -> bool:
+    """Returns True when a row label appears to be segment/product supplemental detail."""
+    normalized = normalize_label(label)
+    if not normalized:
+        return False
+
+    if normalized in SUPPLEMENTAL_SEGMENT_TERMS:
+        return True
+
+    tokens = set(normalized.split("_"))
+    if SUPPLEMENTAL_SEGMENT_TERMS.intersection(tokens):
+        return True
+
+    if normalized.startswith("net_sales_by_") or normalized.startswith("revenue_by_"):
+        return True
+
+    generic_by_prefixes = (
+        "sales_by_",
+        "by_segment_",
+        "segment_",
+        "by_product_",
+        "product_",
+        "by_geography_",
+        "geographic_",
+        "regional_",
+    )
+    return normalized.startswith(generic_by_prefixes)
     
 def normalize_label(label: str) -> str:
     """
