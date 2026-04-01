@@ -8,3 +8,4 @@ global TODO's
 - cleaners beter zodat percentages herkend worden (en alle andere dingen dan standaard USD)
 - make sure the thousands and millions are correct (maybe we need a little bit of context extraction around every table)
 - yoy change and columns with data adding to financial_ratios/scripts/aggregator.py
+- zorgen dat tabellen die op meerdere paginas staan samen komen en zorgen dat de header van een tabel meekomt als er interessante info in staat

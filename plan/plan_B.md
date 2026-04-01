@@ -332,6 +332,26 @@ WS1–WS5
 - [ ] Schema validator passes on benchmark outputs without violations.
 - [ ] `field_resolver`, `ratio_enricher`, and `ratio_calculation` all run without modification or with minimal adapter updates.
 
+## Implementation Update (2026-04-01)
+
+Status: WS1 through WS6 implemented and verified on AAPL, DUOL, and MO benchmark filings.
+
+Completed items:
+- [x] `schema_version: "1.0"` present in compressed benchmark outputs.
+- [x] `company_context` and `filing_context` populated with required fields and fail-fast checks.
+- [x] `statement_metrics` includes expanded `AggregatedMetric` fields (`status`, `yoy_change`, `yoy_unit`, `scale`, `statement_type_confidence`, `source_raw_label`).
+- [x] `market_metrics` contains Stage C placeholder stubs with `source_status: "not_fetched"`.
+- [x] `ratios` shape preserved (`output["ratios"]` unchanged for consumers).
+- [x] `provenance` fully populated (`run_id`, `aggregated_at`, `pipeline_version`, optional evaluation KPIs).
+- [x] `validate_enriched_record()` implemented and executed in warning-only mode in Stage B.
+- [x] WS6 compatibility shims added for envelope-aware and legacy metric-map callers.
+
+Retained earnings parity and Plan A root-cause fix:
+- Root cause traced to Plan A normalization map where `accumulated_deficit` was canonicalized to `retained_earnings`.
+- Fixed at source in `pdf_parser/models/normalization_maps.py` by removing `accumulated_deficit -> retained_earnings` mapping.
+- Added semantic guard in `financial_ratios/scripts/field_resolver.py` so `retained_earnings` does not resolve from pure "Accumulated deficit" labels unless retained-earnings wording is explicitly present.
+- Re-ran parity checks against Stage A baseline for AAPL and DUOL: ratio values are numerically identical.
+
 ---
 
 ## Risks and Mitigations

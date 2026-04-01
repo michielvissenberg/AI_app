@@ -7,8 +7,8 @@ Complete the project end-to-end from stable filing extraction to retrieval-backe
 ## Current Baseline (from README)
 
 - Phase 1 (research): done.
-- Phase 2 (extracting data): mostly done, with parser/evaluation and cleanup pipeline in place.
-- Phase 3 (architecture + database): in progress and now the main delivery focus.
+- Phase 2 (extracting data): done (Stage A complete).
+- Phase 3 (architecture + database): in progress (Stage B complete; Stage C onward active).
 - Phase 4 (UI): intentionally unchanged and out of scope for immediate implementation.
 
 ## Guiding Principles
@@ -32,10 +32,11 @@ A single reliable pipeline:
 
 ## Delivery Plan
 
-### Stage A - Stabilize Extraction Contract (Blocking)
+### Stage A - Stabilize Extraction Contract (Complete)
 
 > Detailed plan: [plan/plan_A.md](plan_A.md)
 > Extraction contract: [plan/extraction_contract.md](extraction_contract.md)
+> Handoff: [plan/stage_a_handoff.md](stage_a_handoff.md)
 
 **Goal:** make parser outputs dependable enough to support all downstream modules.
 
@@ -58,11 +59,16 @@ A single reliable pipeline:
 - `data_raw/`
 - `data_compressed/`
 
+**Status**
+
+- Completed. Stage A outputs are now treated as baseline contract inputs for Stage B+.
+
 ---
 
-### Stage B - Canonical Enriched Data Model
+### Stage B - Canonical Enriched Data Model (Complete)
 
 > Detailed plan: [plan/plan_B.md](plan_B.md)
+> Handoff: [plan/stage_b_handoff.md](stage_b_handoff.md)
 
 **Goal:** define a versioned schema that combines filing data, market data, ratios, and provenance.
 
@@ -91,6 +97,10 @@ A single reliable pipeline:
 
 - `financial_ratios/models/`
 - `financial_ratios/scripts/`
+
+**Status**
+
+- Completed. Canonical schema envelope and compatibility shims are in place; Stage C can build directly on `market_metrics` stubs.
 
 ---
 
@@ -261,22 +271,23 @@ A single reliable pipeline:
 
 ## Dependency Graph
 
-1. Stage A blocks all downstream work.
-2. Stage B depends on A.
-3. Stage C depends on B.
-4. Stage D depends on B and C.
-5. Stage E depends on B (full usefulness after D).
-6. Stage F depends on D and E.
-7. Stage G depends on A-F.
+1. Stage A is complete.
+2. Stage B is complete and built on Stage A.
+3. Stage C depends on Stage B.
+4. Stage D depends on Stage B and Stage C.
+5. Stage E depends on Stage B (full usefulness after Stage D).
+6. Stage F depends on Stage D and Stage E.
+7. Stage G depends on Stages A through F.
 
 ## Suggested Milestones
 
-1. M1: Stage A complete (stable extraction contract).
-2. M2: Stage B + C complete (enriched canonical data).
-3. M3: Stage D complete (extended ratio engine).
-4. M4: Stage E complete (persistence + retrieval online).
-5. M5: Stage F complete (grounded analysis output).
-6. M6: Stage G complete (release candidate).
+1. M1: Stage A complete (stable extraction contract). Done.
+2. M2: Stage B complete (canonical enriched schema). Done.
+3. M3: Stage C complete (market enrichment online).
+4. M4: Stage D complete (extended ratio engine).
+5. M5: Stage E complete (persistence + retrieval online).
+6. M6: Stage F complete (grounded analysis output).
+7. M7: Stage G complete (release candidate).
 
 ## Risks and Mitigations
 
@@ -300,10 +311,8 @@ A single reliable pipeline:
 
 ## Immediate Next Actions (Execution Order)
 
-1. Finalize Stage A duplicate-removal and KPI gate hardening.
-2. Draft and lock Stage B canonical schema in code and docs.
-3. Implement Stage C market fetch + merge path.
-4. Extend Stage D ratio definitions and tests.
-5. Stand up Stage E persistence adapter and read-back tests.
-6. Implement Stage F analysis orchestration with grounding checks.
-7. Run Stage G full-pipeline validation and release checklist.
+1. Implement Stage C market fetch + merge path.
+2. Extend Stage D ratio definitions and tests.
+3. Stand up Stage E persistence adapter and read-back tests.
+4. Implement Stage F analysis orchestration with grounding checks.
+5. Run Stage G full-pipeline validation and release checklist.

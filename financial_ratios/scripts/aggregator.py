@@ -100,9 +100,15 @@ def _resolve_duplicates(
             normalized_label=label,
             value=selected_value,
             priorValue=best_item.get("prior_period_value"),
+            status=_derive_metric_status(best_item),
             unit=best_item.get("unit"),
             source_label=best_item.get("label"),
-            statement_type=best_item.get("statement_type")
+            statement_type=best_item.get("statement_type"),
+            yoy_change=best_item.get("yoy_change"),
+            yoy_unit=best_item.get("yoy_unit"),
+            scale=best_item.get("scale"),
+            statement_type_confidence=best_item.get("statement_type_confidence"),
+            source_raw_label=best_item.get("label"),
         )
 
         if len(entries) > 1:
@@ -213,3 +219,25 @@ def _is_noise(item: Dict[str, Any]) -> bool:
     if label in ['total', 'basic', 'diluted']: return True
 
     return False
+
+
+def _derive_metric_status(item: Dict[str, Any]) -> str:
+    """Maps raw parse and confidence signals to canonical metric status."""
+    parse_status = str(item.get("parse_status", "")).lower()
+    selected_value = item.get("current_period_value")
+    if selected_value is None:
+        selected_value = item.get("value")
+
+    if selected_value is None:
+        return "missing"
+
+    if parse_status in {"", "ok"}:
+        statement_confidence = str(item.get("statement_type_confidence", "")).lower()
+        if statement_confidence == "ambiguous":
+            return "ambiguous"
+        return "ok"
+    if parse_status == "parse_error":
+        return "parse_error"
+    if parse_status == "ambiguous":
+        return "ambiguous"
+    return "ok"

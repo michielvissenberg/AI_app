@@ -119,7 +119,6 @@ INTEREST_EXPENSE_LABEL_MAP = {
 RETAINED_EARNINGS_LABEL_MAP = {
     "retained_earnings": "retained_earnings",
     "retained_earnings_accumulated_deficit": "retained_earnings",
-    "accumulated_deficit": "retained_earnings",
     "accumulated_earnings": "retained_earnings",
 }
 
